@@ -4,7 +4,7 @@ from modules.log import TaPetKeyLogger
 from .assets import ImageAsset
 import glob
 
-def get_skin_path_by_id(asset_id) -> str | None:
+def get_skin_path_by_id(asset_id:str) -> str | None:
     """_获取皮肤路径_
 
     Args:
@@ -21,7 +21,7 @@ def get_skin_path_by_id(asset_id) -> str | None:
         return None
     return path_info
 
-def get_all_assets_tk_by_id(asset_id) -> list[ImageAsset]:
+def get_all_assets_tk_by_id(asset_id:str) -> list[ImageAsset]:
     """_获取指定ID的所有皮肤图像（Tkinter格式）_
 
     Args:
@@ -30,10 +30,13 @@ def get_all_assets_tk_by_id(asset_id) -> list[ImageAsset]:
     Returns:
         list[ImageAsset]: _所有皮肤图像（Tkinter格式）_
     """
-    all_png_path = glob.glob(os.path.join("assets", "skins", asset_id, "*.png"))
+    skin_path = get_skin_path_by_id(asset_id)
+    if not skin_path:
+        return []
+    all_png_path = glob.glob(os.path.join(skin_path, "*.png"))
     all_images = []
+    # 载入
     for path in all_png_path:
         img = Image.open(path)
-        img_tk = ImageTk.PhotoImage(img)
-        all_images.append(ImageAsset(path, img_tk))
+        all_images.append(ImageAsset(path, img))
     return all_images

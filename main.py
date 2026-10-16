@@ -1,6 +1,7 @@
 import tkinter as tk
 from modules.log import *
 from modules.skin_loader import *
+from modules.widgets.charactor import *
 
 class TaPetKeyMain(tk.Tk):
     """TaPetKey 程序的主窗口类体。
@@ -17,29 +18,24 @@ class TaPetKeyMain(tk.Tk):
 
         TaPetKeyLogger.info("主程序进入初始化流程")
 
-        self.skin_assets = []
+        self.current_charactor:Charactor
 
         # 进入窗口挂起阶段
         self.init_window_attr()
 
-        # 载入皮肤资源
-        self.load_skin_res()
-
         # 加载控件资源
-
-    def load_skin_res(self, asset_id='base'):
-        """_为程序载入皮肤资源_
-
-        Args:
-            asset_id (str, optional): _皮肤ID_. 默认是 'base'.
-        """
-        self.skin_assets = get_all_assets_tk_by_id(asset_id)
+        self.init_app_widgets()
 
     def init_window_attr(self):
         self.title("TaPetKey")
-        self.geometry("400x300")
+        self.geometry("1000x1000")
         self.attributes("-topmost", True)
+        self.config(bg='black')
         self.attributes('-transparentcolor', 'black')
+
+    def init_app_widgets(self):
+        self.current_charactor = Charactor(asset_id='base',image_scale=0.5, bg = 'black', width=500, height=500)
+        self.current_charactor.pack(anchor='center')
 
     def test(self):
         TaPetKeyLogger.debug(f"获取到 base 皮肤图像表单：{get_all_assets_tk_by_id('base')[1]}")
