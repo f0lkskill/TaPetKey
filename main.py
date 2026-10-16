@@ -17,13 +17,15 @@ class TaPetKeyMain(tk.Tk):
 
         TaPetKeyLogger.info("主程序进入初始化流程")
 
-        self.skin_assets = {}
+        self.skin_assets = []
 
         # 进入窗口挂起阶段
         self.init_window_attr()
 
         # 载入皮肤资源
         self.load_skin_res()
+
+        # 加载控件资源
 
     def load_skin_res(self, asset_id='base'):
         """_为程序载入皮肤资源_
