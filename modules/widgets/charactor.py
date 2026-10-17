@@ -7,7 +7,16 @@ from threading import Thread
 from random import randint
 
 class Charactor(tk.Canvas):
+    """_角色类_
+    """
     def __init__(self, asset_id='base', image_scale:float=1.0, switch_func=None, **kwargs) -> None:
+        """_初始化角色_
+
+        Args:
+            asset_id (str, optional): _素材ID_. 默认是 'base'.
+            image_scale (float, optional): _图像缩放比例_. 默认是 1.0.
+            switch_func (_type_, optional): _切换回调函数_. 默认是 None.
+        """
         super().__init__(**kwargs)
         self.skin_assets:list[ImageAsset]
         self.current_image:ImageAsset = None # type: ignore
@@ -16,12 +25,14 @@ class Charactor(tk.Canvas):
         self.cache_tk_img:ImageTk.PhotoImage = None # type: ignore
         self.switch_func = switch_func
         self.current_switch_thread:Thread = None # type: ignore
+        self.clean_flag = False
+        self.switch_frequency = 0
 
         # 载入皮肤资源
         self.load_skin_res(asset_id)
 
         # 默认切换到 normal1
-        self.switch_image("normal1")
+        self.switch_image("normal_1")
         
         self.switch_thread = Thread(target=self.base_switch, daemon=True) # type: ignore
         # self.switch_thread.start()
@@ -56,7 +67,6 @@ class Charactor(tk.Canvas):
         """_更新当前显示的图像_
         """
         if self.current_image:
-
             real_size:tuple = self.get_real_size()
             new_image = self.current_image.image.resize(
                 real_size,
@@ -90,13 +100,24 @@ class Charactor(tk.Canvas):
 
         # 进入触发切换流程
         self.switch_image(asset_id)
+        
+        if self.switch_frequency >= 1:
+            return False
 
         if not self.current_switch_thread or not self.current_switch_thread.is_alive():
             # 同一时间只能有一个回调进程
-            self.current_switch_thread = Thread(target=self.switch_func, daemon=True) # type: ignore
-            self.current_switch_thread.start()
+            def pack():
+                self.switch_func() # type: ignore
+                self.switch_frequency = 0
 
-        sleep(self.master.update_internal) # type: ignore
+            # 开跑
+            self.current_switch_thread = Thread(target=pack, daemon=True) # type: ignore
+            try:self.current_switch_thread.start()
+            except Exception as e:TaPetKeyLogger.error("切换线程启动失败, {}", e)
+
+        self.switch_frequency += 1
+
+        return True
 
     def normal_round(self):
         """_执行正常normal动画_

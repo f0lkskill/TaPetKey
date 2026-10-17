@@ -41,6 +41,7 @@ class TaPetKeyMain(tk.Tk):
         Thread(target=self.main_process, daemon=True).start()
 
     def main_process(self) -> None:
+        
         while(1):
             time.sleep(self.update_internal)
             while(len(self.keyboard_trigger.queue_events) > 0):
@@ -55,15 +56,31 @@ class TaPetKeyMain(tk.Tk):
 
                 if len(self.keyboard_trigger.queue_events) != 0:
                     # 有队列，进行 pop 完成处理。
-                    self.keyboard_trigger.queue_events.pop(0)
+
+                    TaPetKeyLogger.debug(f"clean flag: {self.current_charactor.clean_flag}")
                     
-                # 切出
-                if len(self.keyboard_trigger.queue_events) == 0:
-                    self.after(300, lambda:
-                    # 符合没有剩下的事件，进行恢复
-                    self.current_charactor.normal_round() \
-                    if len(self.keyboard_trigger.queue_events) == 0 \
-                    else TaPetKeyLogger.warning("idle 自恢复进程被打断。"))
+                    # 切出
+                    if not self.current_charactor.clean_flag:
+                        
+                        def pack():
+                            # 包装恢复进程 
+                            self.current_charactor.clean_flag = True
+                            time.sleep(self.update_internal * 100)
+                            if len(self.keyboard_trigger.queue_events) == 0 and \
+                                'normal' not in self.current_charactor.current_image.base_name:
+                                # 正常进行轮换
+                                self.current_charactor.normal_round()
+                                TaPetKeyLogger.success("自恢复进程条件满足，进行恢复。")
+                            else:
+                                TaPetKeyLogger.warning("自恢复进程条件不满足，不进行恢复。")
+                            self.current_charactor.clean_flag = False
+
+                        # 开始线程
+                        Thread(target=pack, daemon=True).start()
+
+                    if self.keyboard_trigger.queue_events:
+                        # 防止idle自恢复的打断。
+                        self.keyboard_trigger.queue_events.pop(0)
 
     def random_bounce_event(self):
         self.bounce_event(randint(5, 15))
