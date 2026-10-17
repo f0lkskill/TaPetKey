@@ -53,7 +53,6 @@ class Charactor(tk.Canvas):
         if self.current_image:
 
             real_size:tuple = self.get_real_size()
-            TaPetKeyLogger.debug(f"{self.id_name} 更新图像尺寸: {real_size}")
             new_image = self.current_image.image.resize(
                 real_size,
                 Image.LANCZOS # type: ignore
@@ -65,12 +64,12 @@ class Charactor(tk.Canvas):
 
             # 更新图像显示逻辑
             self.create_image(
-                real_size[0],
-                real_size[1],
-                anchor = 'center',
-                image = self.cache_tk_img
+                real_size[0] // 2,
+                real_size[1] // 2,
+                image = self.cache_tk_img,
+                anchor = tk.CENTER
             )
-            TaPetKeyLogger.debug(f"{self.id_name} 更新图像显示: {self.current_image}")
+            # TaPetKeyLogger.debug(f"{self.id_name} 更新图像显示: {self.current_image}")
 
     def load_skin_res(self, asset_id='base'):
         """_为程序载入皮肤资源_
@@ -83,7 +82,7 @@ class Charactor(tk.Canvas):
 
     def base_switch(self):
         while 1:
-            sleep(0.1)  # 睡眠0.3秒
+            sleep(0.3)  # 睡眠0.3秒
             if self.current_image.base_name == 'normal1':
                 self.switch_image('normal2')
             else:
