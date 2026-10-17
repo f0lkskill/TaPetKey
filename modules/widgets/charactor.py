@@ -4,6 +4,7 @@ from modules.skin_loader import *
 import tkinter as tk
 from time import sleep
 from threading import Thread
+from random import randint
 
 class Charactor(tk.Canvas):
     def __init__(self, asset_id='base', image_scale:float=1.0, switch_func=None, **kwargs) -> None:
@@ -14,6 +15,7 @@ class Charactor(tk.Canvas):
         self.image_scale:float = image_scale
         self.cache_tk_img:ImageTk.PhotoImage = None # type: ignore
         self.switch_func = switch_func
+        self.current_switch_thread:Thread = None # type: ignore
 
         # 载入皮肤资源
         self.load_skin_res(asset_id)
@@ -46,6 +48,9 @@ class Charactor(tk.Canvas):
         """
         return int(self.current_image.width * self.image_scale), \
                int(self.current_image.height * self.image_scale)
+
+    def exists_id(self, asset_id: str):
+        return any(asset.base_name == asset_id for asset in self.skin_assets)
 
     def update_image(self):
         """_更新当前显示的图像_
@@ -80,11 +85,26 @@ class Charactor(tk.Canvas):
         self.skin_assets = get_all_assets_tk_by_id(asset_id)
         TaPetKeyLogger.success(f"{self.id_name} 皮肤资源加载完成")
 
-    def base_switch(self):
-        TaPetKeyLogger.debug(f"基础切换事件触发 {self.switch_func}")
-        self.switch_func() # type: ignore
+    def base_switch(self, asset_id: str):
+        # TaPetKeyLogger.debug(f"基础切换事件触发 {self.switch_func}")
+
+        # 进入触发切换流程
+        self.switch_image(asset_id)
+
+        if not self.current_switch_thread or not self.current_switch_thread.is_alive():
+            # 同一时间只能有一个回调进程
+            self.current_switch_thread = Thread(target=self.switch_func, daemon=True) # type: ignore
+            self.current_switch_thread.start()
+
         sleep(self.master.update_internal) # type: ignore
-        if self.current_image.base_name == 'normal1':
-            self.switch_image('normal2')
-        else:
-            self.switch_image('normal1')
+
+    def normal_round(self):
+        """_执行正常normal动画_
+        """
+        total_normal = 0
+        for assets in self.skin_assets:
+            if assets.base_name.startswith("normal"):
+                total_normal += 1
+        # 随机图片切换
+
+        self.base_switch(f"normal_{randint(1, total_normal)}")

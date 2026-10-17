@@ -27,6 +27,8 @@ class TaPetKeyMain(tk.Tk):
         self.grvaity:float = 3
         self.update_internal:float = 0.01
 
+        self.transparentcolor = "#000000"
+
         # 初始化键盘触发器
         self.keyboard_trigger = KeyboardTrigger()
 
@@ -41,9 +43,27 @@ class TaPetKeyMain(tk.Tk):
     def main_process(self) -> None:
         while(1):
             time.sleep(self.update_internal)
-            while(self.keyboard_trigger.queue_press_count > 0):
-                self.keyboard_trigger.queue_press_count -= 1
-                self.current_charactor.base_switch()
+            while(len(self.keyboard_trigger.queue_events) > 0):
+                event = self.keyboard_trigger.queue_events[0]
+
+                if self.current_charactor.exists_id(f"key_{event.name}"):
+                    # 存在合法id，特殊事件解析成功
+                    self.current_charactor.base_switch(f"key_{event.name}")
+                else:
+                    # 正常动画处理
+                    self.current_charactor.normal_round()
+
+                if len(self.keyboard_trigger.queue_events) != 0:
+                    # 有队列，进行 pop 完成处理。
+                    self.keyboard_trigger.queue_events.pop(0)
+                    
+                # 切出
+                if len(self.keyboard_trigger.queue_events) == 0:
+                    self.after(300, lambda:
+                    # 符合没有剩下的事件，进行恢复
+                    self.current_charactor.normal_round() \
+                    if len(self.keyboard_trigger.queue_events) == 0 \
+                    else TaPetKeyLogger.warning("idle 自恢复进程被打断。"))
 
     def random_bounce_event(self):
         self.bounce_event(randint(5, 15))
@@ -109,8 +129,8 @@ class TaPetKeyMain(tk.Tk):
         self.title("TaPetKey")
         self.geometry("250x250")
         self.attributes("-topmost", True)
-        self.config(bg='black')
-        self.attributes('-transparentcolor', 'black')
+        self.config(bg=self.transparentcolor)
+        self.attributes('-transparentcolor', self.transparentcolor)
         self.overrideredirect(True)
 
         # self.attributes('-disabled', True)  # 忽略鼠标事件，实现穿透
@@ -121,7 +141,7 @@ class TaPetKeyMain(tk.Tk):
         """_初始化应用程序部件_"""
         self.current_charactor = \
         Charactor(
-            asset_id='base', bg = 'black',
+            asset_id='base', bg = self.transparentcolor,
             master=self, image_scale=0.5,
             switch_func=self.random_bounce_event,
             width=250, height=250
