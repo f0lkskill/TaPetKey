@@ -22,7 +22,7 @@ class Charactor(tk.Canvas):
         self.switch_image("normal1")
         
         self.switch_thread = Thread(target=self.base_switch, daemon=True) # type: ignore
-        self.switch_thread.start()
+        # self.switch_thread.start()
 
     def switch_image(self, signal_asset_id:str):
         """_切换当前显示的图像_
@@ -81,11 +81,10 @@ class Charactor(tk.Canvas):
         TaPetKeyLogger.success(f"{self.id_name} 皮肤资源加载完成")
 
     def base_switch(self):
-        while 1:
-            TaPetKeyLogger.debug(f"基础切换事件触发 {self.switch_func}")
-            self.switch_func() # pyright: ignore[reportOptionalCall]
-            sleep(0.01)  # 睡眠0.3秒
-            if self.current_image.base_name == 'normal1':
-                self.switch_image('normal2')
-            else:
-                self.switch_image('normal1')
+        TaPetKeyLogger.debug(f"基础切换事件触发 {self.switch_func}")
+        self.switch_func() # type: ignore
+        sleep(self.master.update_internal) # type: ignore
+        if self.current_image.base_name == 'normal1':
+            self.switch_image('normal2')
+        else:
+            self.switch_image('normal1')

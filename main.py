@@ -2,12 +2,13 @@ import tkinter as tk
 from modules.log import *
 from modules.skin_loader import *
 from modules.widgets.charactor import *
+from modules.keyborad import *
 from random import randint
 import time
 
 class TaPetKeyMain(tk.Tk):
     """TaPetKey 程序的主窗口类体。
-
+    
     Args:
         tk (_type_): _继承自原生tkinter_
     """
@@ -23,8 +24,11 @@ class TaPetKeyMain(tk.Tk):
         self.current_charactor:Charactor
         self._drag_start_x = 0
         self._drag_start_y = 0
-        self.grvaity:float = 2
+        self.grvaity:float = 3
         self.update_internal:float = 0.01
+
+        # 初始化键盘触发器
+        self.keyboard_trigger = KeyboardTrigger()
 
         # 进入窗口挂起阶段
         self.init_window_attr()
@@ -32,8 +36,17 @@ class TaPetKeyMain(tk.Tk):
         # 加载控件资源
         self.init_app_widgets()
 
+        Thread(target=self.main_process, daemon=True).start()
+
+    def main_process(self) -> None:
+        while(1):
+            time.sleep(self.update_internal)
+            while(self.keyboard_trigger.queue_press_count > 0):
+                self.keyboard_trigger.queue_press_count -= 1
+                self.current_charactor.base_switch()
+
     def random_bounce_event(self):
-        self.bounce_event(randint(10, 20))
+        self.bounce_event(randint(5, 15))
 
     def bounce_event(self, strength:float):
         """_触发窗口_
