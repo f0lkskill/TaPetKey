@@ -3,6 +3,7 @@ from modules.log import *
 from modules.skin_loader import *
 from modules.widgets.charactor import *
 from modules.keyborad import *
+from modules.window import *
 from random import randint
 import time
 
@@ -26,6 +27,7 @@ class TaPetKeyMain(tk.Tk):
         self._drag_start_y = 0
         self.grvaity:float = 3
         self.update_internal:float = 0.01
+        self.combo_window = CounterWindow(self)
 
         self.transparentcolor = "#000000"
 
@@ -40,47 +42,62 @@ class TaPetKeyMain(tk.Tk):
 
         Thread(target=self.main_process, daemon=True).start()
 
+    def process_press_event(self) -> None:
+        """_处理按下事件_"""
+        event = self.keyboard_trigger.queue_press_events[0]
+
+        if self.current_charactor.exists_id(f"key_{event.name}"):
+            # 存在合法id，特殊事件解析成功
+            self.current_charactor.base_switch(f"key_{event.name}")
+        else:
+            # 正常动画处理
+            self.current_charactor.normal_round()
+
+        if len(self.keyboard_trigger.queue_press_events) != 0:
+            # 有队列，进行 pop 完成处理。            
+            # 切出
+            if not self.current_charactor.clean_flag:
+                
+                def pack():
+                    # 包装恢复进程
+                    self.current_charactor.clean_flag = True
+                    time.sleep(self.update_internal * 100)
+                    if len(self.keyboard_trigger.queue_press_events) == 0 and \
+                        'normal' not in self.current_charactor.current_image.base_name:
+                        # 正常进行轮换
+                        self.current_charactor.normal_round()
+                        TaPetKeyLogger.success("自恢复进程条件满足，进行恢复。")
+                    else:
+                        TaPetKeyLogger.warning("自恢复进程条件不满足，不进行恢复。")
+                    self.current_charactor.clean_flag = False
+
+                # 开始线程
+                Thread(target=pack, daemon=True).start()
+
+            if self.keyboard_trigger.queue_press_events:
+                # 防止idle自恢复的打断。
+                self.keyboard_trigger.queue_press_events.pop(0)
+
+    def process_release_event(self) -> None:
+        """_处理释放事件_"""
+        self.combo_window.add_one()
+        self.keyboard_trigger.queue_release_events.pop(0)
+
     def main_process(self) -> None:
-        
         while(1):
             time.sleep(self.update_internal)
-            while(len(self.keyboard_trigger.queue_events) > 0):
-                event = self.keyboard_trigger.queue_events[0]
+            while(len(self.keyboard_trigger.queue_press_events) + \
+                  len(self.keyboard_trigger.queue_release_events) > 0):
+                try:
+                    if len(self.keyboard_trigger.queue_press_events) > 0:
+                        # 开始处理事件
+                        self.process_press_event()
+                    elif len(self.keyboard_trigger.queue_release_events) > 0:
+                        # 开始处理释放事件
+                        self.process_release_event()
 
-                if self.current_charactor.exists_id(f"key_{event.name}"):
-                    # 存在合法id，特殊事件解析成功
-                    self.current_charactor.base_switch(f"key_{event.name}")
-                else:
-                    # 正常动画处理
-                    self.current_charactor.normal_round()
-
-                if len(self.keyboard_trigger.queue_events) != 0:
-                    # 有队列，进行 pop 完成处理。
-
-                    TaPetKeyLogger.debug(f"clean flag: {self.current_charactor.clean_flag}")
-                    
-                    # 切出
-                    if not self.current_charactor.clean_flag:
-                        
-                        def pack():
-                            # 包装恢复进程 
-                            self.current_charactor.clean_flag = True
-                            time.sleep(self.update_internal * 100)
-                            if len(self.keyboard_trigger.queue_events) == 0 and \
-                                'normal' not in self.current_charactor.current_image.base_name:
-                                # 正常进行轮换
-                                self.current_charactor.normal_round()
-                                TaPetKeyLogger.success("自恢复进程条件满足，进行恢复。")
-                            else:
-                                TaPetKeyLogger.warning("自恢复进程条件不满足，不进行恢复。")
-                            self.current_charactor.clean_flag = False
-
-                        # 开始线程
-                        Thread(target=pack, daemon=True).start()
-
-                    if self.keyboard_trigger.queue_events:
-                        # 防止idle自恢复的打断。
-                        self.keyboard_trigger.queue_events.pop(0)
+                except Exception as e:
+                    TaPetKeyLogger.error(f"处理键盘事件时发生错误：{e}")
 
     def random_bounce_event(self):
         self.bounce_event(randint(5, 15))
@@ -94,7 +111,7 @@ class TaPetKeyMain(tk.Tk):
         initial_y = self.winfo_y()
         total_offset = 0
 
-        TaPetKeyLogger.debug(f"弹跳事件触发，力度: {strength}")
+        # TaPetKeyLogger.debug(f"弹跳事件触发，力度: {strength}")
 
         while(strength > 0):
             # 向上动量消耗
@@ -133,6 +150,7 @@ class TaPetKeyMain(tk.Tk):
         x_new = self.winfo_x() + delta_x
         y_new = self.winfo_y() + delta_y
         self.geometry(f"+{x_new}+{y_new}")
+        self.combo_window.geometry(f"+{x_new}+{y_new}")
 
         self._drag_start_x = event.x_root
         self._drag_start_y = event.y_root

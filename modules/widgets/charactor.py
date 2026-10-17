@@ -45,7 +45,7 @@ class Charactor(tk.Canvas):
         """
         image_asset = next((asset for asset in self.skin_assets if asset.base_name == signal_asset_id), None) # type: ignore
         if image_asset:
-            TaPetKeyLogger.debug(f"{self.id_name} 切换到图像资产: {signal_asset_id}")
+            # TaPetKeyLogger.debug(f"{self.id_name} 切换到图像资产: {signal_asset_id}")
             self.current_image = image_asset
 
             # 更新控件图像
@@ -100,7 +100,7 @@ class Charactor(tk.Canvas):
 
         # 进入触发切换流程
         self.switch_image(asset_id)
-        
+
         if self.switch_frequency >= 1:
             return False
 
