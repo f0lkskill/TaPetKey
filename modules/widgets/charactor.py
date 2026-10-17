@@ -6,21 +6,22 @@ from time import sleep
 from threading import Thread
 
 class Charactor(tk.Canvas):
-    def __init__(self, asset_id='base', image_scale:float=1.0, **kwargs) -> None:
+    def __init__(self, asset_id='base', image_scale:float=1.0, switch_func=None, **kwargs) -> None:
         super().__init__(**kwargs)
         self.skin_assets:list[ImageAsset]
         self.current_image:ImageAsset = None # type: ignore
         self.id_name = asset_id
         self.image_scale:float = image_scale
         self.cache_tk_img:ImageTk.PhotoImage = None # type: ignore
+        self.switch_func = switch_func
 
         # 载入皮肤资源
         self.load_skin_res(asset_id)
 
         # 默认切换到 normal1
         self.switch_image("normal1")
-
-        self.switch_thread = Thread(target=self.base_switch, daemon=True)
+        
+        self.switch_thread = Thread(target=self.base_switch, daemon=True) # type: ignore
         self.switch_thread.start()
 
     def switch_image(self, signal_asset_id:str):
@@ -43,7 +44,6 @@ class Charactor(tk.Canvas):
         Returns:
             _type_: _(width, height)
         """
-        # TaPetKeyLogger.debug(f"({self.current_image.width},{self.current_image.height}) 获取实际尺寸: {self.image_scale}")
         return int(self.current_image.width * self.image_scale), \
                int(self.current_image.height * self.image_scale)
 
@@ -82,7 +82,9 @@ class Charactor(tk.Canvas):
 
     def base_switch(self):
         while 1:
-            sleep(0.3)  # 睡眠0.3秒
+            TaPetKeyLogger.debug(f"基础切换事件触发 {self.switch_func}")
+            self.switch_func() # pyright: ignore[reportOptionalCall]
+            sleep(0.01)  # 睡眠0.3秒
             if self.current_image.base_name == 'normal1':
                 self.switch_image('normal2')
             else:
