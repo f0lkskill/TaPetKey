@@ -129,3 +129,13 @@ class Charactor(tk.Canvas):
         # 随机图片切换
 
         self.base_switch(f"normal_{randint(1, total_normal)}")
+
+    def miss_round(self):
+        """_执行miss动画_
+        """
+        total_miss = 0
+        for assets in self.skin_assets:
+            if assets.base_name.startswith("miss"):
+                total_miss += 1
+        # 随机图片切换
+        self.base_switch(f"miss_{randint(1, total_miss)}")

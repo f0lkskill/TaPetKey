@@ -27,13 +27,13 @@ class TaPetKeyMain(tk.Tk):
         self._drag_start_y = 0
         self.grvaity:float = 3
         self.update_internal:float = 0.01
-        self.combo_window = CounterWindow(self)
+        self.combo_window = CounterWindow(master = self)
 
         self.transparentcolor = "#000000"
 
         # 初始化键盘触发器
         self.keyboard_trigger = KeyboardTrigger()
-
+        
         # 进入窗口挂起阶段
         self.init_window_attr()
 
@@ -117,6 +117,7 @@ class TaPetKeyMain(tk.Tk):
             # 向上动量消耗
             total_offset += strength
             self.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()-strength)}")
+            self.combo_window.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()-strength)}")
             strength -= self.grvaity
             time.sleep(self.update_internal)
 
@@ -124,11 +125,13 @@ class TaPetKeyMain(tk.Tk):
             # 重力向下
             total_offset -= strength
             self.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()+strength)}")
+            self.combo_window.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()+strength)}")
             strength += self.grvaity
             time.sleep(self.update_internal)
 
         # 回归初始坐标
         self.geometry(f"+{self.winfo_x()}+{initial_y}")
+        self.combo_window.geometry(f"+{self.combo_window.winfo_x()}+{initial_y}")
 
     def start_move(self, event) -> None:
         """_更新窗口偏移量_
