@@ -10,8 +10,11 @@ import ctypes.wintypes as wt
 
 from PIL import Image, ImageChops
 
-user32 = ctypes.windll.user32
-gdi32 = ctypes.windll.gdi32
+# 使用独立的 WinDLL 实例：ctypes 的 argtypes 是绑定在库对象上的，
+# 若直接用 ctypes.windll.*（进程内共享）设置类型，会与其它模块（如 tray.py）
+# 对同一函数设置的类型互相覆盖，导致 ArgumentError。独立实例可完全隔离。
+user32 = ctypes.WinDLL("user32", use_last_error=True)
+gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 
 WS_EX_LAYERED = 0x00080000
 GWL_EXSTYLE = -20

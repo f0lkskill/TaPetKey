@@ -14,7 +14,7 @@ class EffectWindow(tk.Toplevel):
     """
 
     gravity:float = 0.2
-    max_particles:int = 3
+    max_particles:int = 8
     # 初始锚点相对窗口中心的整体下移量（基准像素，随整体缩放）
     start_offset_y:int = 60
     # 生命周期（秒）：渐入 -> 保持 -> 渐出
