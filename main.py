@@ -1,3 +1,4 @@
+import time
 import tkinter as tk
 from modules.log import *
 from modules.skin_loader import *
@@ -27,10 +28,13 @@ class TaPetKeyMain(tk.Tk):
         self.grvaity:float = 3
         self.update_internal:float = 0.01
         self.combo_window = CounterWindow(master = self)
-        self.effect_windows = []
+        self.effect_windows:list[EffectWindow] = []
         self.max_effect_windows:int = 3
+        self.last_press_time:float = time.time()
+        self.restore_time:float = 1.0
 
         # 弹跳动画状态
+        self._is_bounce:bool = False
         self._bounce_initial_y:int = 0
         self._bounce_total:float = 0.0
         self._bounce_strength:float = 0.0
@@ -50,6 +54,7 @@ class TaPetKeyMain(tk.Tk):
 
         # 主线程轮询事件队列（避免子线程操作 tkinter 导致窗口闪烁/崩溃）
         self.after(int(self.update_internal * 1000), self.main_process)
+        self.after(int(self.update_internal * 1000), self.restore_check)
 
     def process_press_event(self) -> None:
         """_处理按下事件_"""
@@ -60,6 +65,7 @@ class TaPetKeyMain(tk.Tk):
         self.effect_windows = [w for w in self.effect_windows if w.winfo_exists()]
         # 限制同时存在的效果窗口数量，防止长按时 CPU 打满
         if len(self.effect_windows) < self.max_effect_windows:
+            # 可以创建新的窗口
             self.effect_windows.append(
                 EffectWindow(show_text=event.name if event.name != 'backspace' else 'delete', master=self,
                              on_close=self._remove_effect_window))
@@ -71,30 +77,26 @@ class TaPetKeyMain(tk.Tk):
             # 正常动画处理
             self.current_charactor.normal_round()
 
-        if len(self.keyboard_trigger.queue_press_events) != 0:
-            # 有队列，进行 pop 完成处理。            
-            # 切出
-            if not self.current_charactor.clean_flag:
+        # 防止idle自恢复的打断。
+        if self.keyboard_trigger.queue_press_events:
+            self.last_press_time = time.time()
+            self.keyboard_trigger.queue_press_events.pop(0)
 
-                def recover():
-                    # 包装恢复进程
-                    if len(self.keyboard_trigger.queue_press_events) == 0 and \
-                        'normal' not in self.current_charactor.current_image.base_name:
-                        # 正常进行轮换
-                        self.current_charactor.normal_round()
-                        # TaPetKeyLogger.success("自恢复进程条件满足，进行恢复。")
-                    else:
-                        pass
-                        # TaPetKeyLogger.warning("自恢复进程条件不满足，不进行恢复。")
-                    self.current_charactor.clean_flag = False
+    def restore_check(self):
+        """检查是否要进行贴图恢复"""
+        if time.time() - self.last_press_time > self.restore_time:
+            if len(self.keyboard_trigger.queue_press_events) == 0 and \
+                'normal' not in self.current_charactor.current_image.base_name:
+                # 这里排除最后一个动画是正常打字
+                if 'miss' not in self.current_charactor.current_image.base_name:
+                    # 正常进行轮换
+                    TaPetKeyLogger.debug(f"detail: {self.current_charactor.current_image.base_name}," \
+                                            f" current: {len(self.keyboard_trigger.queue_press_events)}")
+                    self.current_charactor.normal_round()
+                    TaPetKeyLogger.success("自恢复进程条件满足，进行恢复。")
 
-                # 主线程延迟调度恢复
-                self.current_charactor.clean_flag = True
-                self.after(int(self.update_internal * 1000 * 100), recover)
-
-            if self.keyboard_trigger.queue_press_events:
-                # 防止idle自恢复的打断。
-                self.keyboard_trigger.queue_press_events.pop(0)
+        # 循环检测
+        self.after(int(self.update_internal * 1000), self.restore_check)
 
     def process_release_event(self) -> None:
         """_处理释放事件_"""
@@ -138,7 +140,10 @@ class TaPetKeyMain(tk.Tk):
             strength (float): _弹跳力度大小_
         """
         # TaPetKeyLogger.debug(f"弹跳事件触发，力度: {strength}")
+        if self._is_bounce:
+            return
 
+        self._is_bounce = True
         self._bounce_initial_y = self.winfo_y()
         self._bounce_total = 0.0
         self._bounce_strength = float(strength)
@@ -178,6 +183,7 @@ class TaPetKeyMain(tk.Tk):
 
         if self._bounce_on_finish:
             callback = self._bounce_on_finish
+            self._is_bounce = False
             self._bounce_on_finish = None
             callback()
 
@@ -238,5 +244,6 @@ class TaPetKeyMain(tk.Tk):
         TaPetKeyLogger.debug(f"获取到 base 皮肤图像表单：{get_all_assets_tk_by_id('base')[1]}")
 
 if __name__=="__main__":
+
     app = TaPetKeyMain()
     app.mainloop()
