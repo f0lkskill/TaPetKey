@@ -1,6 +1,5 @@
 from .lib import *
-import win32con
-import win32gui
+from PIL import ImageChops
 
 class EffectWindow(tk.Toplevel):
     """_特效文本窗口（单窗口 + Canvas 多粒子）_
@@ -8,10 +7,21 @@ class EffectWindow(tk.Toplevel):
     只维护一个透明窗口，所有旋转坠落的文字以 Canvas item 的形式
     在其中渲染。相比每次按键都新建一个 Toplevel，长按连发时不会
     反复创建/销毁窗口，显著降低卡顿。
+
+    注意：窗口位置只在粒子生成（add）和拖拽同步（sync_position）时
+    更新，不会每帧跟随主窗口，因此主窗口弹跳时特效不会跟着一起跳。
     """
 
-    gravity:float = 0.1
-    max_particles:int = 16
+    gravity:float = 0.2
+    max_particles:int = 3
+    # 初始锚点相对窗口中心的整体下移量（基准像素，随整体缩放）
+    start_offset_y:int = 60
+    # 重绘（旋转）间隔帧数：中间帧只更新坐标，显著降低 CPU 占用
+    redraw_every:int = 2
+    # 生命周期（秒）：渐入 -> 保持 -> 渐出
+    fade_in:float = 0.10
+    hold:float = 0.05
+    fade_out:float = 0.22
 
     def __init__(self, update_interval: float = 0.01, master=None, **kwargs):
         """_初始化特效窗口_"""
@@ -28,7 +38,6 @@ class EffectWindow(tk.Toplevel):
 
         self.init_window_attr()
         self.init_window_widget()
-        self._make_click_through()
 
     def _master_scale(self) -> float:
         """_主窗口当前整体缩放比例_"""
@@ -42,6 +51,7 @@ class EffectWindow(tk.Toplevel):
     def _master_size(self) -> int:
         """_主窗口当前边长_"""
         if hasattr(self.master_app, "main_size"):
+            assert self.master_app is not None
             return self.master_app.main_size()
         return 250
 
@@ -60,22 +70,12 @@ class EffectWindow(tk.Toplevel):
         self.mainframe = tk.Canvas(self, bg="black", highlightthickness=0)
         self.mainframe.pack(fill=tk.BOTH, expand=True)
 
-    def _make_click_through(self):
-        """_让窗口鼠标穿透，避免遮挡主窗口的拖动/点击_"""
-        try:
-            hwnd = win32gui.GetAncestor(self.winfo_id(), win32con.GA_ROOT)
-            ex_style = win32gui.GetWindowLong(hwnd, win32con.GWL_EXSTYLE)
-            win32gui.SetWindowLong(
-                hwnd, win32con.GWL_EXSTYLE,
-                ex_style | win32con.WS_EX_TRANSPARENT | win32con.WS_EX_LAYERED)
-        except Exception as e:
-            TaPetKeyLogger.warning(f"设置特效窗口鼠标穿透失败: {e}")
-
-    def _sync_geometry(self):
-        """_跟随主窗口：尺寸随缩放、中心对齐并叠加皮肤偏移_"""
+    def sync_position(self):
+        """_按主窗口当前位置重新对齐（仅在拖拽等时机调用）_"""
         side = max(1, int(self._master_size() * 2))
         self._side = side
 
+        assert self.master_app is not None
         mx = self.master_app.winfo_x()
         my = self.master_app.winfo_y()
         mw = self.master_app.winfo_width()
@@ -95,23 +95,25 @@ class EffectWindow(tk.Toplevel):
         Args:
             show_text (str): _要显示的文本_
         """
-        self._sync_geometry()
+        self.sync_position()
+        # 达到上限时静默忽略，不再顶掉旧粒子
         if len(self.particles) >= self.max_particles:
-            self._remove_particle(self.particles[0])
+            return
 
         half = self._side / 2
+        # 初始锚点整体下移（随整体缩放），让文字从角色偏下位置生成
+        anchor_y = half + self.start_offset_y * self._master_scale()
         particle = {
             "x": half + randint(-30, 30),
-            "y": half + randint(-30, 30),
+            "y": anchor_y + randint(-30, 30),
             "vy": 0.0,
             "rotate": 0.0,
             "rotate_tick": 3 * choice([i for i in list(range(-2, 2)) if i != 0]),
             "life": 0.0,
-            "fade": 1.0,
-            "fade_v": 0.1,
             "base": self._get_base_img(show_text),
             "photo": None,
             "item": None,
+            "frame": 0,
         }
         self.particles.append(particle)
 
@@ -139,13 +141,23 @@ class EffectWindow(tk.Toplevel):
                   font=font, anchor="mm")
         return img
 
+    def _fade_at(self, life: float) -> float:
+        """_按已存活时间计算透明度（先渐入，保持，再渐出）_"""
+        if life < self.fade_in:
+            return life / self.fade_in
+        if life < self.fade_in + self.hold:
+            return 1.0
+        t = (life - self.fade_in - self.hold) / self.fade_out
+        return max(0.0, 1.0 - t)
+
     def _apply_brightness(self, img: Image.Image, factor: float) -> Image.Image:
-        """_用亮度衰减模拟淡出（Canvas 无法单独设置 item 透明度）_"""
-        r, g, b, a = img.split()
-        r = r.point(lambda v: int(v * factor))
-        g = g.point(lambda v: int(v * factor))
-        b = b.point(lambda v: int(v * factor))
-        return Image.merge("RGBA", (r, g, b, a))
+        """_用亮度衰减模拟淡入/淡出（Canvas 无法单独设置 item 透明度）_
+
+        使用 C 实现的 ImageChops.multiply，避免逐像素 Python 回调造成的卡顿。
+        """
+        v = max(0, min(255, int(255 * factor)))
+        mask = Image.new("RGBA", img.size, (v, v, v, 255))
+        return ImageChops.multiply(img, mask)
 
     def _remove_particle(self, particle: dict):
         """_移除粒子及其实体化 item_"""
@@ -156,7 +168,7 @@ class EffectWindow(tk.Toplevel):
             self.particles.remove(particle)
 
     def _tick(self):
-        """_单帧：旋转绘制 + 下落 + 淡出（单条 after 链驱动全部粒子）_"""
+        """_单帧：旋转绘制 + 下落 + 渐入/渐出（单条 after 链驱动全部粒子）_"""
         if not self._alive:
             return
 
@@ -165,33 +177,37 @@ class EffectWindow(tk.Toplevel):
         factor = min((now - self._last_time) / self.update_internal, 3.0)
         self._last_time = now
 
-        self._sync_geometry()
-
         for particle in list(self.particles):
             particle["rotate"] += particle["rotate_tick"] * factor
             particle["vy"] += self.gravity * factor
             particle["y"] += particle["vy"] * factor
             particle["life"] += self.update_internal * factor
+            particle["frame"] += 1
 
-            # 停留 0.5s 后淡出
-            if particle["life"] >= 0.5:
-                particle["fade"] -= particle["fade_v"] * factor
-                particle["fade_v"] += 0.005 * factor
-                if particle["fade"] <= 0:
-                    self._remove_particle(particle)
-                    continue
+            # 渐入 -> 保持 -> 渐出
+            fade = self._fade_at(particle["life"])
+            if fade <= 0:
+                self._remove_particle(particle)
+                continue
+            particle["fade"] = fade
 
-            # 旋转绘制并复用同一个 canvas item，避免每帧堆积
-            img = particle["base"].rotate(
-                particle["rotate"], expand=True, resample=Image.BILINEAR)
-            if particle["fade"] < 1.0:
-                img = self._apply_brightness(img, particle["fade"])
-            particle["photo"] = ImageTk.PhotoImage(img)
-            if particle["item"] is None:
-                particle["item"] = self.mainframe.create_image(
-                    particle["x"], particle["y"], image=particle["photo"])
-            else:
-                self.mainframe.itemconfig(particle["item"], image=particle["photo"])
+            # 渐变期间每帧重绘以保证平滑，稳定后按间隔重绘
+            need_redraw = (particle["item"] is None
+                           or fade != 1.0
+                           or particle["frame"] % self.redraw_every == 0)
+            if need_redraw:
+                img = particle["base"].rotate(
+                    particle["rotate"], expand=True, resample=Image.BILINEAR) # type: ignore
+                if fade < 1.0:
+                    img = self._apply_brightness(img, fade)
+                particle["photo"] = ImageTk.PhotoImage(img)
+                if particle["item"] is None:
+                    particle["item"] = self.mainframe.create_image(
+                        particle["x"], particle["y"], image=particle["photo"])
+                else:
+                    self.mainframe.itemconfig(particle["item"],
+                                              image=particle["photo"])
+            if particle["item"] is not None:
                 self.mainframe.coords(particle["item"],
                                       particle["x"], particle["y"])
 

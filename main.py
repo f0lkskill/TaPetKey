@@ -196,6 +196,9 @@ class TaPetKeyMain(tk.Tk):
 
     def _bounce_step(self):
         """_弹跳动画单帧（主线程 after 驱动）_"""
+        # 拖拽等操作会通过置 False 打断弹跳
+        if not self._is_bounce:
+            return
         interval = max(1, int(self.update_internal * 1000))
 
         if self._bounce_phase == "up":
@@ -224,18 +227,24 @@ class TaPetKeyMain(tk.Tk):
         self.geometry(f"+{self.winfo_x()}+{self._bounce_initial_y}")
         self._place_combo_window()
 
-        if self._bounce_on_finish:
-            callback = self._bounce_on_finish
-            self._is_bounce = False
-            self._bounce_on_finish = None
+        # 无条件复位，避免 on_finish 为空时卡住状态
+        self._is_bounce = False
+        callback = self._bounce_on_finish
+        self._bounce_on_finish = None
+        if callback:
             callback()
 
     def start_move(self, event) -> None:
-        """_更新窗口偏移量_
+        """_开始拖拽：打断进行中的弹跳，避免位置冲突_
 
         Args:
             event (_type_): _TK标准事件_
         """
+        # 打断弹跳，避免弹跳动画在拖拽时把窗口拽回原位
+        if self._is_bounce:
+            self._is_bounce = False
+            self._bounce_on_finish = None
+
         self._drag_start_x = event.x_root
         self._drag_start_y = event.y_root
 
@@ -251,14 +260,31 @@ class TaPetKeyMain(tk.Tk):
         y_new = self.winfo_y() + delta_y
         self.geometry(f"+{x_new}+{y_new}")
         self._place_combo_window()
+        if self.effect_window:
+            self.effect_window.sync_position()
 
         self._drag_start_x = event.x_root
         self._drag_start_y = event.y_root
+
+    def _on_drag_end(self, event=None) -> None:
+        """_拖拽结束：更新缓存坐标并立即持久化（强杀进程也能记住位置）_"""
+        self._last_pos = (self.winfo_x(), self.winfo_y())
+        self._save_window_pos()
+
+    def _save_window_pos(self) -> None:
+        """_把主窗口当前位置写入配置_"""
+        try:
+            set_config(POS_X_VALUE, int(self.winfo_x()))
+            set_config(POS_Y_VALUE, int(self.winfo_y()))
+        except Exception as e:
+            TaPetKeyLogger.error(f"保存窗口位置失败：{e}")
 
     def bind_window_event(self):
         """_绑定窗口事件_"""
         self.bind("<Button-1>", self.start_move)
         self.bind("<B1-Motion>", self.update_move)
+        # 拖拽结束立即持久化位置
+        self.bind("<ButtonRelease-1>", self._on_drag_end)
 
     def init_window_attr(self):
         self.title("TaPetKey")
@@ -307,6 +333,11 @@ class TaPetKeyMain(tk.Tk):
         self.current_charactor.set_skin(asset_id)
         self._load_skin_layout(asset_id)
         self._apply_scale()
+        # 换肤即持久化（即使进程被强杀也能记住选择）
+        try:
+            set_config(SKIN_VALUE, asset_id)
+        except Exception as e:
+            TaPetKeyLogger.error(f"保存皮肤配置失败：{e}")
 
     def _load_user_scale(self) -> float:
         """_从配置读取用户缩放比例（限定 50%~200%）_"""
