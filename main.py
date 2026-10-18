@@ -1,5 +1,4 @@
 import time, os
-import os
 import tkinter as tk
 from modules.log import *
 from modules.skin_loader import *
