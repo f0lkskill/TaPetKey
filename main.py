@@ -1,4 +1,4 @@
-import time, os
+import time, os, queue
 import tkinter as tk
 from modules.log import *
 from modules.skin_loader import *
@@ -23,7 +23,9 @@ class TaPetKeyMain(tk.Tk):
         TaPetKeyLogger.info("主程序进入初始化流程")
 
         self.current_charactor:Charactor
-        self.app_tray:AppTray = AppTray(self._exit_app)
+        # 托盘线程与主线程之间的换肤请求队列
+        self._skin_queue:queue.Queue = queue.Queue()
+        self.app_tray:AppTray = AppTray(self._exit_app, self._request_switch_skin)
         self._drag_start_x = 0
         self._drag_start_y = 0
         self.grvaity:float = 3
@@ -121,6 +123,13 @@ class TaPetKeyMain(tk.Tk):
             self.effect_windows.remove(window)
 
     def main_process(self) -> None:
+        # 处理托盘线程发来的换肤请求（跨线程仅通过队列传递，主线程应用）
+        while not self._skin_queue.empty():
+            try:
+                self._apply_skin(self._skin_queue.get_nowait())
+            except Exception as e:
+                TaPetKeyLogger.error(f"切换皮肤失败：{e}")
+
         # 每帧限量处理，长按连发时也要让主线程及时返回事件循环，避免卡死
         max_per_tick = 2
         processed = 0
@@ -253,6 +262,22 @@ class TaPetKeyMain(tk.Tk):
             width=250, height=250
         )
         self.current_charactor.pack(side=tk.TOP)
+
+    def _request_switch_skin(self, asset_id: str) -> None:
+        """_托盘线程请求换肤（仅入队，由主线程应用）_
+
+        Args:
+            asset_id (str): _皮肤ID（皮肤目录名）_
+        """
+        self._skin_queue.put(asset_id)
+
+    def _apply_skin(self, asset_id: str) -> None:
+        """_主线程应用新皮肤_
+
+        Args:
+            asset_id (str): _皮肤ID（皮肤目录名）_
+        """
+        self.current_charactor.set_skin(asset_id)
 
     def _exit_app(self):
         TaPetKeyLogger.info("程序触发退出事件。")

@@ -10,10 +10,12 @@ import win32ui
 from PIL import Image, ImageChops
 
 from modules.config import is_autostart_enabled, set_autostart
+from modules.skin_loader import get_all_skins
 
 ICON_DIR = "assets/icon"
 AUTOSTART_ON_ICON = os.path.join(ICON_DIR, "on.png")
 AUTOSTART_OFF_ICON = os.path.join(ICON_DIR, "off.png")
+SKIN_ICON = os.path.join(ICON_DIR, "skin.png")
 
 # 菜单项图标相对勾选栏尺寸的放大倍数
 ICON_SCALE = 2
@@ -43,10 +45,23 @@ _user32.DrawTextW.argtypes = [
     ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int, ctypes.c_void_p,
     ctypes.c_uint]
 _user32.DrawTextW.restype = ctypes.c_int
+# 绘制子菜单箭头
+_user32.DrawFrameControl.argtypes = [
+    ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_uint]
+_user32.DrawFrameControl.restype = ctypes.c_int
 
 
 def _append_owner_draw(menu, item_id):
     _user32.AppendMenuW(menu, win32con.MF_OWNERDRAW, item_id, None)
+
+
+# 皮肤子菜单项的起始 ID
+SKIN_ITEM_ID_BASE = 2000
+# 子菜单箭头占位宽度
+ARROW_WIDTH = 16
+# DrawFrameControl 常量（子菜单箭头）
+_DFC_MENU = 2
+_DFCS_MENUARROW = 0x0000
 
 # 托盘消息
 WM_TRAYICON = win32con.WM_USER + 20
@@ -54,6 +69,7 @@ WM_TRAYICON = win32con.WM_USER + 20
 # 菜单项 ID
 ID_AUTOSTART = 1000
 ID_EXIT = 1001
+ID_SKIN = 1002
 
 # owner-draw 消息
 _ODT_MENU = 1
@@ -219,11 +235,14 @@ class AppTray:
     因此图标可以自由放大，且菜单项高度会随图标自适应。
     """
 
-    def __init__(self, exit_func):
+    def __init__(self, exit_func, on_switch_skin=None):
         self.exit_func = exit_func
+        self.on_switch_skin = on_switch_skin
         self.hwnd = None
         self.hicon = None
         self._thread = None
+        self._skin_item_map = {}    # 皮肤子菜单项 ID -> 皮肤ID
+        self._submenu_builders = {} # 父项 ID -> 返回子菜单句柄的可调用对象
 
         self._icon_size = 0
         self._item_meta = {}        # item_id -> {text, bitmap, width, height}
@@ -235,12 +254,20 @@ class AppTray:
         self._hfont = None
         self._hfont_owned = False
 
-        # 菜单项：id / 文本 / 图标（路径或返回路径的可调用对象）
+        # 菜单项（全部 owner-draw 自绘）：
+        #   {id, text, icon(路径或返回路径的可调用对象), submenu?}
+        #   带 submenu 的项点击时手动弹出子菜单，并在右侧绘制箭头。
         self.menu_items = [
             {
                 "id": ID_AUTOSTART,
                 "text": "开机自启动",
                 "icon": self._autostart_icon,
+            },
+            {
+                "id": ID_SKIN,
+                "text": "皮肤",
+                "icon": SKIN_ICON,
+                "submenu": self._build_skin_submenu,
             },
             {
                 "id": ID_EXIT,
@@ -323,6 +350,48 @@ class AppTray:
         self._hfont = None
         self._hfont_owned = False
 
+    def _measure_text(self, text):
+        """_测量文字尺寸（复用当前菜单字体）_"""
+        screen = win32gui.GetDC(0)
+        screen_dc = win32ui.CreateDCFromHandle(screen)
+        measure_dc = screen_dc.CreateCompatibleDC()
+        measure_hdc = measure_dc.GetSafeHdc()
+        old_font = None
+        if self._hfont:
+            old_font = win32gui.SelectObject(measure_hdc, self._hfont)
+        try:
+            return measure_dc.GetTextExtent(text)
+        finally:
+            if old_font:
+                win32gui.SelectObject(measure_hdc, old_font)
+            measure_dc.DeleteDC()
+            screen_dc.DeleteDC()
+            win32gui.ReleaseDC(0, screen)
+
+    def _load_icon_bitmap(self, icon_path):
+        """_加载图标并转为预乘 alpha 位图（真透明）_"""
+        if not icon_path or not os.path.exists(icon_path): # type: ignore
+            return None
+        src = Image.open(icon_path).convert("RGBA").resize( # type: ignore
+            (self._icon_size, self._icon_size), Image.LANCZOS) # type: ignore
+        bmp = _make_alpha_bitmap(src)
+        self._bitmaps.append(bmp)
+        return bmp
+
+    def _skin_icon_path(self, skin):
+        """_取皮肤预览图路径（info.json 的 icon，缺失则回退目录内首张 png）_"""
+        skin_dir = os.path.join("assets", "skins", skin["id"])
+        icon = skin.get("icon")
+        if icon:
+            path = os.path.join(skin_dir, icon)
+            if os.path.exists(path):
+                return path
+        if os.path.isdir(skin_dir):
+            for name in sorted(os.listdir(skin_dir)):
+                if name.lower().endswith(".png"):
+                    return os.path.join(skin_dir, name)
+        return None
+
     def _build_menu(self):
         """_构建 owner-draw 自绘菜单_"""
         menu = win32gui.CreatePopupMenu()
@@ -346,49 +415,59 @@ class AppTray:
         self._icon_size = check * ICON_SCALE
         icon_size = self._icon_size
 
-        # 用于测量文字尺寸
-        screen = win32gui.GetDC(0)
-        screen_dc = win32ui.CreateDCFromHandle(screen)
-        measure_dc = screen_dc.CreateCompatibleDC()
-        measure_hdc = measure_dc.GetSafeHdc()
-        old_measure_font = None
-        if self._hfont:
-            old_measure_font = win32gui.SelectObject(measure_hdc, self._hfont)
+        for item in self.menu_items:
+            item_id = item["id"]
+            text = item["text"]
+            has_sub = "submenu" in item
+            if has_sub:
+                self._submenu_builders[item_id] = item["submenu"]
 
-        try:
-            for item in self.menu_items:
-                item_id = item["id"]
-                text = item["text"]
-                icon_path = item["icon"]
-                if callable(icon_path):
-                    icon_path = icon_path()
+            icon_path = item.get("icon")
+            if callable(icon_path):
+                icon_path = icon_path()
+            bmp = self._load_icon_bitmap(icon_path)
 
-                bmp = None
-                if icon_path and os.path.exists(icon_path): # type: ignore
-                    src = Image.open(icon_path).convert("RGBA").resize( # type: ignore
-                        (icon_size, icon_size), Image.LANCZOS) # type: ignore
-                    bmp = _make_alpha_bitmap(src)   # 真透明（预乘 alpha）
-                    self._bitmaps.append(bmp)
+            text_w, text_h = self._measure_text(text)
+            width = ITEM_MARGIN * 2 + text_w
+            if bmp is not None:
+                width += icon_size + ITEM_GAP
+            if has_sub:
+                width += ARROW_WIDTH
+            height = max(icon_size, text_h) + ITEM_VPAD * 2
 
-                text_w, text_h = measure_dc.GetTextExtent(text)
-                width = ITEM_MARGIN * 2 + text_w
-                if bmp is not None:
-                    width += icon_size + ITEM_GAP
-                height = max(icon_size, text_h) + ITEM_VPAD * 2
-
-                self._item_meta[item_id] = {
-                    "text": text, "bitmap": bmp,
-                    "width": width, "height": height,
-                }
-                _append_owner_draw(menu, item_id)
-        finally:
-            if old_measure_font:
-                win32gui.SelectObject(measure_hdc, old_measure_font)
-            measure_dc.DeleteDC()
-            screen_dc.DeleteDC()
-            win32gui.ReleaseDC(0, screen)
+            self._item_meta[item_id] = {
+                "text": text, "bitmap": bmp,
+                "width": width, "height": height,
+                "has_submenu": has_sub,
+            }
+            _append_owner_draw(menu, item_id)
 
         return menu
+
+    def _build_skin_submenu(self):
+        """_构建皮肤子菜单（自绘，预览图来自各皮肤 info.json 的 icon）_"""
+        submenu = win32gui.CreatePopupMenu()
+        self._skin_item_map = {}
+        icon_size = self._icon_size
+        for index, skin in enumerate(get_all_skins()):
+            item_id = SKIN_ITEM_ID_BASE + index
+            self._skin_item_map[item_id] = skin["id"]
+
+            bmp = self._load_icon_bitmap(self._skin_icon_path(skin))
+            text = skin["name"]
+            text_w, text_h = self._measure_text(text)
+            width = ITEM_MARGIN * 2 + text_w
+            if bmp is not None:
+                width += icon_size + ITEM_GAP
+            height = max(icon_size, text_h) + ITEM_VPAD * 2
+
+            self._item_meta[item_id] = {
+                "text": text, "bitmap": bmp,
+                "width": width, "height": height,
+                "has_submenu": False,
+            }
+            _append_owner_draw(submenu, item_id)
+        return submenu
 
     def _on_measure_item(self, lparam):
         try:
@@ -443,10 +522,21 @@ class AppTray:
             win32gui.SetBkMode(hdc, win32con.TRANSPARENT)
             win32gui.SetTextColor(
                 hdc, self._hl_text_color if selected else self._text_color)
-            text_rect = _RECT(x, rc.top, rc.right - ITEM_MARGIN, rc.bottom)
+            text_right = rc.right - ITEM_MARGIN
+            if meta.get("has_submenu"):
+                text_right -= ARROW_WIDTH
+            text_rect = _RECT(x, rc.top, text_right, rc.bottom)
             _user32.DrawTextW(
                 hdc, meta["text"], -1, ctypes.byref(text_rect),
                 win32con.DT_SINGLELINE | win32con.DT_VCENTER | win32con.DT_LEFT)
+
+            # 子菜单箭头
+            if meta.get("has_submenu"):
+                cy = (rc.top + rc.bottom) // 2
+                arrow = _RECT(rc.right - ITEM_MARGIN - 8, cy - 4,
+                              rc.right - ITEM_MARGIN, cy + 4)
+                _user32.DrawFrameControl(
+                    hdc, ctypes.byref(arrow), _DFC_MENU, _DFCS_MENUARROW)
         finally:
             if old_font:
                 win32gui.SelectObject(hdc, old_font)
@@ -469,6 +559,27 @@ class AppTray:
         win32gui.PostMessage(self.hwnd, win32con.WM_NULL, 0, 0)
         win32gui.DestroyMenu(menu) # type: ignore
 
+    def _show_skin_submenu(self):
+        """_点击「皮肤」项时在光标处弹出皮肤子菜单_"""
+        builder = self._submenu_builders.get(ID_SKIN)
+        if not builder:
+            return
+        submenu = builder()
+        try:
+            pos = win32gui.GetCursorPos()
+            win32gui.SetForegroundWindow(self.hwnd) # type: ignore
+            cmd = win32gui.TrackPopupMenu(
+                submenu,
+                win32con.TPM_LEFTALIGN | win32con.TPM_TOPALIGN |
+                win32con.TPM_RETURNCMD,
+                pos[0], pos[1], 0, self.hwnd, None) # type: ignore
+            if cmd:
+                skin_id = self._skin_item_map.get(cmd)
+                if skin_id is not None and self.on_switch_skin:
+                    self.on_switch_skin(skin_id)
+        finally:
+            win32gui.DestroyMenu(submenu) # type: ignore
+
     def _wnd_proc(self, hwnd, msg, wparam, lparam):
         if msg == WM_TRAYICON:
             if lparam in (win32con.WM_RBUTTONUP, win32con.WM_LBUTTONUP):
@@ -479,6 +590,12 @@ class AppTray:
                 self.exit_func()
             elif item_id == ID_AUTOSTART:
                 self._toggle_autostart()
+            elif item_id == ID_SKIN:
+                self._show_skin_submenu()
+            else:
+                skin_id = self._skin_item_map.get(item_id)
+                if skin_id is not None and self.on_switch_skin:
+                    self.on_switch_skin(skin_id)
         elif msg == win32con.WM_MEASUREITEM:
             return self._on_measure_item(lparam)
         elif msg == win32con.WM_DRAWITEM:

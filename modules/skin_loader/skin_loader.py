@@ -1,8 +1,46 @@
+import json
 import os
 from PIL import Image, ImageTk
 from modules.log import TaPetKeyLogger
 from .assets import ImageAsset
 import glob
+
+
+def get_all_skins() -> list[dict]:
+    """_获取所有皮肤的信息_
+
+    扫描 assets/skins 下的每个目录，读取其 info.json 作为菜单描述。
+
+    Returns:
+        list[dict]: _每项为 {id, name, description, version, author, icon}_
+    """
+    skins_dir = os.path.join("assets", "skins")
+    skins = []
+    if not os.path.exists(skins_dir):
+        TaPetKeyLogger.warning(f"未找到皮肤目录: {skins_dir}")
+        return skins
+
+    for name in sorted(os.listdir(skins_dir)):
+        skin_path = os.path.join(skins_dir, name)
+        if not os.path.isdir(skin_path):
+            continue
+        info = {}
+        info_path = os.path.join(skin_path, "info.json")
+        if os.path.exists(info_path):
+            try:
+                with open(info_path, "r", encoding="utf-8") as f:
+                    info = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                TaPetKeyLogger.error(f"读取皮肤配置失败 {info_path}: {e}")
+        skins.append({
+            "id": name,
+            "name": info.get("name", name),
+            "description": info.get("description", ""),
+            "version": info.get("version", ""),
+            "author": info.get("author", ""),
+            "icon": info.get("icon", ""),
+        })
+    return skins
 
 def get_skin_path_by_id(asset_id:str) -> str | None:
     """_获取皮肤路径_

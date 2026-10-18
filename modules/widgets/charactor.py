@@ -100,6 +100,19 @@ class Charactor(tk.Canvas):
         TaPetKeyLogger.success(f"{self.id_name} 热键绑定事件分析完成, 共绑定 {len(self.combine_keys)} 个热键。")
         TaPetKeyLogger.info(f"包含的热键：{[x for x in self.combine_keys.keys()]}")
 
+    def set_skin(self, asset_id: str):
+        """_重载并应用新的皮肤_
+
+        Args:
+            asset_id (str): _皮肤ID（即皮肤目录名）_
+        """
+        TaPetKeyLogger.info(f"切换皮肤: {self.id_name} -> {asset_id}")
+        self.id_name = asset_id
+        # 重新分析热键绑定，先清空旧的
+        self.combine_keys = {}
+        self.load_skin_res(asset_id)
+        self.switch_image("normal_1")
+
     def base_switch(self, asset_id: str):
         # TaPetKeyLogger.debug(f"基础切换事件触发 {self.switch_func}")
 
