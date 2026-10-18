@@ -7,21 +7,24 @@ from random import randint
 class Charactor(tk.Canvas):
     """_角色类_
     """
-    def __init__(self, asset_id='base', image_scale:float=1.0, switch_func=None, **kwargs) -> None:
+    def __init__(self, asset_id='base', image_scale:float=1.0, switch_func=None,
+                 on_render=None, **kwargs) -> None:
         """_初始化角色_
 
         Args:
             asset_id (str, optional): _素材ID_. 默认是 'base'.
             image_scale (float, optional): _图像缩放比例_. 默认是 1.0.
             switch_func (_type_, optional): _切换回调函数_. 默认是 None.
+            on_render (_type_, optional): _图像变化后回调（用于分层窗口重绘）_. 默认是 None.
         """
         super().__init__(**kwargs)
         self.skin_assets:list[ImageAsset]
         self.current_image:ImageAsset = None # type: ignore
+        self.current_rgba:Image.Image = None # type: ignore
         self.id_name = asset_id
         self.image_scale:float = image_scale
-        self.cache_tk_img:ImageTk.PhotoImage = None # type: ignore
         self.switch_func = switch_func
+        self.on_render = on_render
         self.switch_busy:bool = False
         self.clean_flag = False
         self.switch_frequency = 0
@@ -69,26 +72,17 @@ class Charactor(tk.Canvas):
         return any(asset.base_name == asset_id for asset in self.skin_assets)
 
     def update_image(self):
-        """_更新当前显示的图像_
+        """_更新当前显示的图像（渲染为 RGBA 供分层窗口使用）_
         """
         if self.current_image:
             real_size:tuple = self.get_real_size()
-            new_image = self.current_image.image.resize(
+            self.current_rgba = self.current_image.image.convert("RGBA").resize(
                 real_size,
                 Image.LANCZOS # type: ignore
             )
-            self.cache_tk_img = ImageTk.PhotoImage(new_image)
-
-            # 先清除
-            self.delete('all')
-
-            # 更新图像显示逻辑
-            self.create_image(
-                real_size[0] // 2,
-                real_size[1] // 2,
-                image = self.cache_tk_img,
-                anchor = tk.CENTER
-            )
+            # 通知宿主（主窗口）重绘分层窗口
+            if self.on_render:
+                self.on_render()
             # TaPetKeyLogger.debug(f"{self.id_name} 更新图像显示: {self.current_image}")
 
     def load_skin_res(self, asset_id='base'):

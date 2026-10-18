@@ -1,12 +1,13 @@
 from .lib import *
 from PIL import ImageChops
+from .layered import LayeredWindow
 
 class EffectWindow(tk.Toplevel):
-    """_特效文本窗口（单窗口 + Canvas 多粒子）_
+    """_特效文本窗口（分层窗口 + 每帧 PIL 合成）_
 
-    只维护一个透明窗口，所有旋转坠落的文字以 Canvas item 的形式
-    在其中渲染。相比每次按键都新建一个 Toplevel，长按连发时不会
-    反复创建/销毁窗口，显著降低卡顿。
+    只维护一个透明窗口，所有旋转坠落的文字每帧用 PIL 合成一张 RGBA 图后
+    通过 UpdateLayeredWindow 推送给系统，边缘为真正的每像素 alpha，
+    不再有颜色键的误扣 / 扣不干净问题。
 
     注意：窗口位置只在粒子生成（add）和拖拽同步（sync_position）时
     更新，不会每帧跟随主窗口，因此主窗口弹跳时特效不会跟着一起跳。
@@ -16,8 +17,6 @@ class EffectWindow(tk.Toplevel):
     max_particles:int = 3
     # 初始锚点相对窗口中心的整体下移量（基准像素，随整体缩放）
     start_offset_y:int = 60
-    # 重绘（旋转）间隔帧数：中间帧只更新坐标，显著降低 CPU 占用
-    redraw_every:int = 2
     # 生命周期（秒）：渐入 -> 保持 -> 渐出
     fade_in:float = 0.10
     hold:float = 0.05
@@ -35,9 +34,12 @@ class EffectWindow(tk.Toplevel):
         self._last_time:float = time.time()
         self._text_cache:dict = {}      # 文本 -> 基础白色 RGBA 图
         self.particles:list = []        # 活动粒子列表
+        self._pos:tuple = (0, 0)
+        self._last_frame:Image.Image = None # type: ignore
 
         self.init_window_attr()
-        self.init_window_widget()
+        self.surface = LayeredWindow(self)
+        self.surface.bind()
 
     def _master_scale(self) -> float:
         """_主窗口当前整体缩放比例_"""
@@ -61,14 +63,7 @@ class EffectWindow(tk.Toplevel):
         self._side = side
         self.geometry(f"{side}x{side}")
         self.attributes("-topmost", True)
-        self.config(bg="black")
-        self.attributes("-transparentcolor", "black")
         self.overrideredirect(True)
-
-    def init_window_widget(self):
-        """_初始化窗口小部件_"""
-        self.mainframe = tk.Canvas(self, bg="black", highlightthickness=0)
-        self.mainframe.pack(fill=tk.BOTH, expand=True)
 
     def sync_position(self):
         """_按主窗口当前位置重新对齐（仅在拖拽等时机调用）_"""
@@ -76,18 +71,24 @@ class EffectWindow(tk.Toplevel):
         self._side = side
 
         assert self.master_app is not None
-        mx = self.master_app.winfo_x()
-        my = self.master_app.winfo_y()
-        mw = self.master_app.winfo_width()
-        mh = self.master_app.winfo_height()
-        if mw <= 1 or mh <= 1:
-            mw = mh = self._master_size()
+        if hasattr(self.master_app, "current_window_geometry"):
+            # 使用主窗口逻辑几何，避免 winfo 滞后导致对齐错位
+            mx, my, mw, mh = self.master_app.current_window_geometry()
+        else:
+            mx = self.master_app.winfo_x()
+            my = self.master_app.winfo_y()
+            mw = self.master_app.winfo_width()
+            mh = self.master_app.winfo_height()
+            if mw <= 1 or mh <= 1:
+                mw = mh = self._master_size()
 
         # 窗口中心对齐主窗口中心，再减去皮肤配置的偏移（像素）
         offset_x, offset_y = self._master_effect_offset()
         x = mx + mw // 2 - side // 2 - offset_x
         y = my + mh // 2 - side // 2 - offset_y
-        self.geometry(f"{side}x{side}+{x}+{y}")
+        self._pos = (int(x), int(y))
+        if self._alive and self._last_frame is not None:
+            self.surface.set_frame(self._last_frame, self._pos[0], self._pos[1])
 
     def add(self, show_text: str):
         """_新增一个文字粒子_
@@ -110,9 +111,8 @@ class EffectWindow(tk.Toplevel):
             "rotate": 0.0,
             "rotate_tick": 3 * choice([i for i in list(range(-2, 2)) if i != 0]),
             "life": 0.0,
+            "fade": 1.0,
             "base": self._get_base_img(show_text),
-            "photo": None,
-            "item": None,
             "frame": 0,
         }
         self.particles.append(particle)
@@ -120,8 +120,8 @@ class EffectWindow(tk.Toplevel):
         if not self._alive:
             self._alive = True
             self._last_time = time.time()
+            self._tick()          # 立即合成并推送首帧
             self.deiconify()
-            self._tick()
 
     def _get_base_img(self, text: str) -> Image.Image:
         """_获取（带缓存的）基础文本图像_"""
@@ -151,7 +151,7 @@ class EffectWindow(tk.Toplevel):
         return max(0.0, 1.0 - t)
 
     def _apply_brightness(self, img: Image.Image, factor: float) -> Image.Image:
-        """_用亮度衰减模拟淡入/淡出（Canvas 无法单独设置 item 透明度）_
+        """_用亮度衰减模拟淡入/淡出_
 
         使用 C 实现的 ImageChops.multiply，避免逐像素 Python 回调造成的卡顿。
         """
@@ -159,16 +159,23 @@ class EffectWindow(tk.Toplevel):
         mask = Image.new("RGBA", img.size, (v, v, v, 255))
         return ImageChops.multiply(img, mask)
 
-    def _remove_particle(self, particle: dict):
-        """_移除粒子及其实体化 item_"""
-        if particle["item"] is not None:
-            self.mainframe.delete(particle["item"])
-            particle["item"] = None
-        if particle in self.particles:
-            self.particles.remove(particle)
+    def _render_frame(self) -> Image.Image:
+        """_把所有粒子合成为一张 RGBA 图_"""
+        side = self._side
+        canvas = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+        for particle in self.particles:
+            img = particle["base"].rotate(
+                particle["rotate"], expand=True, resample=Image.BILINEAR) # type: ignore
+            fade = particle.get("fade", 1.0)
+            if fade < 1.0:
+                img = self._apply_brightness(img, fade)
+            px = int(particle["x"] - img.width / 2)
+            py = int(particle["y"] - img.height / 2)
+            canvas.alpha_composite(img, (px, py))
+        return canvas
 
     def _tick(self):
-        """_单帧：旋转绘制 + 下落 + 渐入/渐出（单条 after 链驱动全部粒子）_"""
+        """_单帧：物理更新 + 合成 + 推送（单条 after 链驱动全部粒子）_"""
         if not self._alive:
             return
 
@@ -187,44 +194,27 @@ class EffectWindow(tk.Toplevel):
             # 渐入 -> 保持 -> 渐出
             fade = self._fade_at(particle["life"])
             if fade <= 0:
-                self._remove_particle(particle)
+                self.particles.remove(particle)
                 continue
             particle["fade"] = fade
 
-            # 渐变期间每帧重绘以保证平滑，稳定后按间隔重绘
-            need_redraw = (particle["item"] is None
-                           or fade != 1.0
-                           or particle["frame"] % self.redraw_every == 0)
-            if need_redraw:
-                img = particle["base"].rotate(
-                    particle["rotate"], expand=True, resample=Image.BILINEAR) # type: ignore
-                if fade < 1.0:
-                    img = self._apply_brightness(img, fade)
-                particle["photo"] = ImageTk.PhotoImage(img)
-                if particle["item"] is None:
-                    particle["item"] = self.mainframe.create_image(
-                        particle["x"], particle["y"], image=particle["photo"])
-                else:
-                    self.mainframe.itemconfig(particle["item"],
-                                              image=particle["photo"])
-            if particle["item"] is not None:
-                self.mainframe.coords(particle["item"],
-                                      particle["x"], particle["y"])
-
             # 坠落出窗口底部则回收
             if particle["y"] > self._side:
-                self._remove_particle(particle)
+                self.particles.remove(particle)
 
         if not self.particles:
             self._alive = False
             self.withdraw()
             return
 
+        frame = self._render_frame()
+        self._last_frame = frame
+        self.surface.set_frame(frame, self._pos[0], self._pos[1])
+
         self.after(self._interval, self._tick)
 
     def clear(self):
         """_清空全部粒子_"""
-        for particle in list(self.particles):
-            self._remove_particle(particle)
+        self.particles.clear()
         self._alive = False
         self.withdraw()

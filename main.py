@@ -41,6 +41,9 @@ class TaPetKeyMain(tk.Tk):
         self.user_scale:float = self._load_user_scale()
         self._initial_skin:str = self._load_last_skin()
         self._last_pos:tuple = self._load_last_pos() or (0, 0)
+        # 逻辑静止坐标：窗口"应处"的位置（弹跳/拖拽的基准，避免 winfo 时序滞后）
+        self._rest_x:int = int(self._last_pos[0])
+        self._rest_y:int = int(self._last_pos[1])
         self._skin_scale:float = 0.5
         self._combo_offset_base:tuple = (0, 0)
         self._effect_offset_base:tuple = (70, 20)
@@ -53,13 +56,14 @@ class TaPetKeyMain(tk.Tk):
         self.last_press_time:float = time.time()
         self.restore_time:float = 1.0
 
-        # 弹跳动画状态
+        # 弹跳动画状态（基于逻辑静止坐标，不依赖 winfo 的时序滞后）
         self._is_bounce:bool = False
-        self._bounce_initial_y:int = 0
-        self._bounce_total:float = 0.0
-        self._bounce_strength:float = 0.0
-        self._bounce_phase:str = "up"
+        self._bounce_offset:float = 0.0
+        self._bounce_v:float = 0.0
         self._bounce_on_finish = None
+
+        # 分层窗口当前帧缓存（角色 RGBA 图）
+        self._current_frame = None
 
         self.transparentcolor = "#000000"
 
@@ -167,8 +171,8 @@ class TaPetKeyMain(tk.Tk):
                 TaPetKeyLogger.error(f"处理键盘事件时发生错误：{e}")
             processed += 1
 
-        # 记录窗口位置（在主线程读取，退出时持久化到配置）
-        self._last_pos = (self.winfo_x(), self.winfo_y())
+        # 记录窗口静止坐标（退出时持久化；用逻辑坐标避免弹跳中途记录到中间值）
+        self._last_pos = (self._rest_x, self._rest_y)
 
         # 主线程 after 轮询
         self.after(int(self.update_internal * 1000), self.main_process)
@@ -187,12 +191,35 @@ class TaPetKeyMain(tk.Tk):
             return
 
         self._is_bounce = True
-        self._bounce_initial_y = self.winfo_y()
-        self._bounce_total = 0.0
-        self._bounce_strength = float(strength)
-        self._bounce_phase = "up"
+        # 速度积分：向上为负偏移，重力（grvaity）逐渐把速度拉回向下
+        # 全程只基于逻辑静止坐标运算，不读取 winfo_y()，避免时序滞后造成漂移
+        self._bounce_offset = 0.0
+        self._bounce_v = -float(strength)
         self._bounce_on_finish = on_finish
         self._bounce_step()
+
+    def _push_frame(self) -> None:
+        """_把当前角色帧推送到分层窗口（含弹跳偏移），并同步气泡窗_"""
+        if self._current_frame is None:
+            return
+        y = self._rest_y
+        if self._is_bounce:
+            y = int(round(self._rest_y + self._bounce_offset))
+        self.surface.set_frame(self._current_frame, self._rest_x, y)
+        self._place_combo_window()
+
+    def _render_character(self) -> None:
+        """_角色图像变化时回调：缓存帧并重绘分层窗口_"""
+        char = getattr(self, "current_charactor", None)
+        rgba = getattr(char, "current_rgba", None)
+        if rgba is None:
+            return
+        self._current_frame = rgba
+        self._push_frame()
+
+    def _apply_bounce_frame(self):
+        """_把当前弹跳偏移应用到窗口（位置＝静止坐标＋偏移）_"""
+        self._push_frame()
 
     def _bounce_step(self):
         """_弹跳动画单帧（主线程 after 驱动）_"""
@@ -201,38 +228,24 @@ class TaPetKeyMain(tk.Tk):
             return
         interval = max(1, int(self.update_internal * 1000))
 
-        if self._bounce_phase == "up":
-            if self._bounce_strength > 0:
-                # 向上动量消耗
-                self._bounce_total += self._bounce_strength
-                self.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()-self._bounce_strength)}")
-                self._place_combo_window()
-                self._bounce_strength -= self.grvaity
-                self.after(interval, self._bounce_step)
-                return
-            self._bounce_phase = "down"
-            self.after(interval, self._bounce_step)
+        # 速度积分：位置 += 速度；速度 += 重力（向下为正）
+        self._bounce_offset += self._bounce_v
+        self._bounce_v += self.grvaity
+
+        # 回到静止位置（或已越过向下）时结束，并精确归位
+        if self._bounce_offset >= 0:
+            self._bounce_offset = 0.0
+            self._apply_bounce_frame()
+            # 无条件复位，避免 on_finish 为空时卡住状态
+            self._is_bounce = False
+            callback = self._bounce_on_finish
+            self._bounce_on_finish = None
+            if callback:
+                callback()
             return
 
-        if self._bounce_total > 0:
-            # 重力向下
-            self._bounce_total -= self._bounce_strength
-            self.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()+self._bounce_strength)}")
-            self._place_combo_window()
-            self._bounce_strength += self.grvaity
-            self.after(interval, self._bounce_step)
-            return
-
-        # 回归初始坐标
-        self.geometry(f"+{self.winfo_x()}+{self._bounce_initial_y}")
-        self._place_combo_window()
-
-        # 无条件复位，避免 on_finish 为空时卡住状态
-        self._is_bounce = False
-        callback = self._bounce_on_finish
-        self._bounce_on_finish = None
-        if callback:
-            callback()
+        self._apply_bounce_frame()
+        self.after(interval, self._bounce_step)
 
     def start_move(self, event) -> None:
         """_开始拖拽：打断进行中的弹跳，避免位置冲突_
@@ -240,26 +253,26 @@ class TaPetKeyMain(tk.Tk):
         Args:
             event (_type_): _TK标准事件_
         """
-        # 打断弹跳，避免弹跳动画在拖拽时把窗口拽回原位
+        # 打断弹跳，避免弹跳动画在拖拽时把窗口拽回原位；
+        # 把弹跳的当前偏移并入静止基准（分层窗口下 winfo 不可靠，不用它）
         if self._is_bounce:
             self._is_bounce = False
             self._bounce_on_finish = None
+            self._rest_y = int(round(self._rest_y + self._bounce_offset))
+            self._bounce_offset = 0.0
 
         self._drag_start_x = event.x_root
         self._drag_start_y = event.y_root
 
     def update_move(self, event) -> None:
-        """_更新窗口位置_
+        """_更新窗口位置（基于逻辑静止坐标累加，避免 winfo 滞后漂移）_
 
         Args:
             event (_type_): _TK标准事件_
         """
-        delta_x = event.x_root - self._drag_start_x
-        delta_y = event.y_root - self._drag_start_y
-        x_new = self.winfo_x() + delta_x
-        y_new = self.winfo_y() + delta_y
-        self.geometry(f"+{x_new}+{y_new}")
-        self._place_combo_window()
+        self._rest_x += event.x_root - self._drag_start_x
+        self._rest_y += event.y_root - self._drag_start_y
+        self._push_frame()
         if self.effect_window:
             self.effect_window.sync_position()
 
@@ -268,14 +281,14 @@ class TaPetKeyMain(tk.Tk):
 
     def _on_drag_end(self, event=None) -> None:
         """_拖拽结束：更新缓存坐标并立即持久化（强杀进程也能记住位置）_"""
-        self._last_pos = (self.winfo_x(), self.winfo_y())
+        self._last_pos = (self._rest_x, self._rest_y)
         self._save_window_pos()
 
     def _save_window_pos(self) -> None:
-        """_把主窗口当前位置写入配置_"""
+        """_把主窗口静止坐标写入配置_"""
         try:
-            set_config(POS_X_VALUE, int(self.winfo_x()))
-            set_config(POS_Y_VALUE, int(self.winfo_y()))
+            set_config(POS_X_VALUE, int(self._rest_x))
+            set_config(POS_Y_VALUE, int(self._rest_y))
         except Exception as e:
             TaPetKeyLogger.error(f"保存窗口位置失败：{e}")
 
@@ -289,12 +302,15 @@ class TaPetKeyMain(tk.Tk):
     def init_window_attr(self):
         self.title("TaPetKey")
         size = self.main_size()
-        pos_x, pos_y = self._last_pos
-        self.geometry(f"{size}x{size}+{pos_x}+{pos_y}")
+        self._rest_x, self._rest_y = int(self._last_pos[0]), int(self._last_pos[1])
+        self.geometry(f"{size}x{size}+{self._rest_x}+{self._rest_y}")
         self.attributes("-topmost", True)
         self.config(bg=self.transparentcolor)
-        self.attributes('-transparentcolor', self.transparentcolor)
         self.overrideredirect(True)
+
+        # 改造成每像素 alpha 的分层窗口（彻底替代 -transparentcolor 色键）
+        self.surface = LayeredWindow(self)
+        self.surface.bind()
 
         self.bind_window_event()
 
@@ -306,9 +322,12 @@ class TaPetKeyMain(tk.Tk):
             asset_id=self._initial_skin, bg = self.transparentcolor,
             master=self, image_scale=self._skin_scale * self.user_scale,
             switch_func=self.random_bounce_event,
+            on_render=self._render_character,
             width=size, height=size
         )
-        self.current_charactor.pack(side=tk.TOP)
+        # 角色逻辑在此创建（构造期间 current_charactor 尚未赋值，回调会跳过），
+        # 这里显式渲染首帧
+        self._render_character()
 
         # 单个特效文本窗口（复用于所有按键粒子）
         self.effect_window = EffectWindow(master=self)
@@ -394,11 +413,22 @@ class TaPetKeyMain(tk.Tk):
         """_主窗口当前边长（按缩放）_"""
         return max(1, int(250 * self.user_scale))
 
+    def current_window_geometry(self) -> tuple:
+        """_主窗口当前逻辑几何 (x, y, w, h)_
+        
+        基于静止坐标 + 弹跳偏移计算，不依赖 winfo 的时序（避免滞后导致子窗口错位）。
+        """
+        x, y = self._rest_x, self._rest_y
+        if self._is_bounce:
+            y = int(round(self._rest_y + self._bounce_offset))
+        size = self.main_size()
+        return x, y, size, size
+
     def _place_combo_window(self) -> None:
         """_按皮肤偏移把气泡窗口对齐到主窗口_"""
         ox, oy = self.combo_offset
-        self.combo_window.geometry(
-            f"+{self.winfo_x() + ox}+{self.winfo_y() + oy}")
+        x, y, _, _ = self.current_window_geometry()
+        self.combo_window.set_position(x + ox, y + oy)
 
     def _request_zoom(self, delta: float) -> None:
         """_托盘线程请求缩放（仅入队，由主线程应用）_
@@ -422,7 +452,8 @@ class TaPetKeyMain(tk.Tk):
     def _apply_scale(self) -> None:
         """_按当前缩放刷新主窗口、角色与气泡窗口尺寸_"""
         size = self.main_size()
-        self.geometry(f"{size}x{size}")
+        # 同步 Tk 的尺寸与位置认知（含逻辑坐标，避免 Tk 用陈旧位置回挪窗口）
+        self.geometry(f"{size}x{size}+{self._rest_x}+{self._rest_y}")
         if hasattr(self, "current_charactor"):
             self.current_charactor.config(width=size, height=size)
             self.current_charactor.apply_scale(self._skin_scale * self.user_scale)

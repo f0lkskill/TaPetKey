@@ -1,7 +1,8 @@
 from .lib import *
+from .layered import LayeredWindow
 
 class CounterWindow(tk.Toplevel):
-    """_combo计数器窗口_
+    """_combo计数器窗口（分层窗口 + PIL 渲染，支持每像素 alpha）_
 
     Args:
         tk (_type_): _tk_
@@ -12,11 +13,6 @@ class CounterWindow(tk.Toplevel):
         super().__init__(*args, **kwargs)
         # 先隐藏，避免原生 Toplevel 默认窗口一闪而过
         self.withdraw()
-        self.mainframe:tk.Canvas
-        self.bubble_img_tk:ImageTk.PhotoImage = None # type: ignore
-        self.text_id:int = -1
-        self.bubble_item_id:int = -1
-        self._bubble_size:int = 0
         self.current_count:int = 0
         self.current_alpha:float = 0.0
         self.last_input_time:float = 0.0
@@ -25,11 +21,17 @@ class CounterWindow(tk.Toplevel):
         self._fade_gen:int = 0
         self.has_lost = True
 
-        self.init_window_attr()
-        self.init_window_widget()
-        self.draw_image()
+        # 分层窗口状态
+        self._pos:tuple = (0, 0)
+        self._frame:Image.Image = None # type: ignore
+        self._bubble_cache:Image.Image = None # type: ignore
+        self._bubble_cache_size:int = 0
+        self._font_cache:dict = {}
+        self.surface = LayeredWindow(self)
 
-        # 属性就绪后再显示
+        self.init_window_attr()
+        self.draw_image()
+        # 首帧已推送（alpha=0 不可见），此时显示不会闪黑
         self.deiconify()
 
         # 主线程 after 轮询（避免子线程操作 tkinter）
@@ -46,24 +48,60 @@ class CounterWindow(tk.Toplevel):
             scale (float): _缩放比例_
         """
         self.scale = scale
-        size = self._size()
-        self.geometry(f"{size}x{size}")
         self.draw_image()
 
     def init_window_attr(self):
         """_初始化窗口属性_"""
         self.title("计数器")
-        self.geometry(f"{self._size()}x{self._size()}")
         self.attributes("-topmost", True)
-        self.config(bg="black")
-        self.attributes("-transparentcolor", "black")
         self.overrideredirect(True)
-        self.attributes('-alpha', self.current_alpha)
+        # 改造成每像素 alpha 的分层窗口
+        self.surface.bind()
 
-    def init_window_widget(self):
-        """_初始化窗口小部件_"""
-        self.mainframe = tk.Canvas(self)
-        self.mainframe.pack(fill=tk.BOTH, expand=True)
+    def set_position(self, x: int, y: int):
+        """_移动窗口（分层窗口需重新推送帧）_"""
+        self._pos = (int(x), int(y))
+        self._push()
+
+    def _get_bubble(self, size: int) -> Image.Image:
+        """_获取（按尺寸缓存的）气泡底图_"""
+        if self._bubble_cache is None or self._bubble_cache_size != size:
+            img = Image.open("assets/ui/bubble.png").convert("RGBA")
+            self._bubble_cache = img.resize((size, size))
+            self._bubble_cache_size = size
+        return self._bubble_cache
+
+    def _get_font(self, size: int):
+        """_获取（缓存的）粗体等宽字体_"""
+        if size not in self._font_cache:
+            font = None
+            for name in ("consolab.ttf", "consola.ttf"):
+                try:
+                    font = ImageFont.truetype(name, size)
+                    break
+                except OSError:
+                    continue
+            if font is None:
+                font = ImageFont.load_default()
+            self._font_cache[size] = font
+        return self._font_cache[size]
+
+    def draw_image(self):
+        """_渲染气泡底图 + 计数字到分层窗口_"""
+        size = self._size()
+        frame = self._get_bubble(size).copy()
+        draw = ImageDraw.Draw(frame)
+        font = self._get_font(max(1, int(30 * self.scale)))
+        draw.text((size / 2, size / 2), str(self.current_count),
+                  fill="#151515", font=font, anchor="mm")
+        self._frame = frame
+        self._push()
+
+    def _push(self):
+        """_把当前帧（含整体透明度）推送到分层窗口_"""
+        if self._frame is not None:
+            self.surface.set_frame(self._frame, self._pos[0], self._pos[1],
+                                   alpha=self.current_alpha)
 
     def add_one(self):
         """_添加一个计数_"""
@@ -75,34 +113,10 @@ class CounterWindow(tk.Toplevel):
         self.last_input_time = time.time()
         self.draw_image()
 
-        # TaPetKeyLogger.debug(f"current has lost: {self.has_lost}")
-
         if self.has_lost:
             # 初始进行动效已经记录状态
             self.has_lost = False
             self.call_fade(self.fade_in)
-
-    def draw_image(self):
-        """_初始化图像_"""
-        # 删除旧 item，避免 Canvas item 随连击无限累积导致越来越卡
-        self.mainframe.delete(self.text_id)
-        if self.bubble_item_id != -1:
-            self.mainframe.delete(self.bubble_item_id)
-
-        size = self._size()
-        # 气泡底图仅在尺寸变化时重建，避免每次按键都读盘/缩放
-        if self.bubble_img_tk is None or self._bubble_size != size:
-            img = Image.open("assets/ui/bubble.png")
-            img = img.resize((size, size))
-            self.bubble_img_tk = ImageTk.PhotoImage(img)
-            self._bubble_size = size
-
-        self.bubble_item_id = self.mainframe.create_image(
-            size / 2, size / 2, image=self.bubble_img_tk)
-
-        self.text_id = self.mainframe.create_text(size / 2, size / 2,
-             text=str(self.current_count), fill="#151515",
-               font=("Consolas", max(1, int(30 * self.scale)), 'bold'))
 
     def detect_refresh(self):
         """_检测刷新（主线程 after 轮询）_"""
@@ -127,7 +141,7 @@ class CounterWindow(tk.Toplevel):
     def fade_away(self, gen:int):
         """_淡出窗口_"""
         self.current_alpha = 1.0
-        self.attributes('-alpha', 1.0)
+        self._push()
 
         v = 0.1
 
@@ -137,11 +151,11 @@ class CounterWindow(tk.Toplevel):
                 return
             if v <= 0:
                 self.current_alpha = 0.0
-                self.attributes('-alpha', 0.0)
+                self._push()
                 return
-            self.current_alpha -= v
+            self.current_alpha = max(0.0, self.current_alpha - v)
             v -= 0.005
-            self.attributes('-alpha', max(0.0, self.current_alpha))
+            self._push()
             self.after(int(self.master.update_internal * 1000), step) # type: ignore
 
         step()
@@ -150,7 +164,7 @@ class CounterWindow(tk.Toplevel):
         """_淡入窗口_"""
         # 初始化重置初始状态
         self.current_alpha = 0.0
-        self.attributes('-alpha', 0.0)
+        self._push()
 
         v = 0.1
 
@@ -160,11 +174,11 @@ class CounterWindow(tk.Toplevel):
                 return
             if v <= 0:
                 self.current_alpha = 1.0
-                self.attributes('-alpha', 1.0)
+                self._push()
                 return
-            self.current_alpha += v
+            self.current_alpha = min(1.0, self.current_alpha + v)
             v -= 0.005
-            self.attributes('-alpha', min(1.0, self.current_alpha))
+            self._push()
             self.after(int(self.master.update_internal * 1000), step) # type: ignore
 
         step()
