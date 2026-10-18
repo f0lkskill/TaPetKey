@@ -13,8 +13,10 @@ class CounterWindow(tk.Toplevel):
         # 先隐藏，避免原生 Toplevel 默认窗口一闪而过
         self.withdraw()
         self.mainframe:tk.Canvas
-        self.bubble_img_tk:ImageTk.PhotoImage
+        self.bubble_img_tk:ImageTk.PhotoImage = None # type: ignore
         self.text_id:int = -1
+        self.bubble_item_id:int = -1
+        self._bubble_size:int = 0
         self.current_count:int = 0
         self.current_alpha:float = 0.0
         self.last_input_time:float = 0.0
@@ -82,13 +84,21 @@ class CounterWindow(tk.Toplevel):
 
     def draw_image(self):
         """_初始化图像_"""
+        # 删除旧 item，避免 Canvas item 随连击无限累积导致越来越卡
         self.mainframe.delete(self.text_id)
+        if self.bubble_item_id != -1:
+            self.mainframe.delete(self.bubble_item_id)
 
         size = self._size()
-        img = Image.open("assets/ui/bubble.png")
-        img = img.resize((size, size))
-        self.bubble_img_tk = ImageTk.PhotoImage(img)
-        self.mainframe.create_image(size / 2, size / 2, image=self.bubble_img_tk)
+        # 气泡底图仅在尺寸变化时重建，避免每次按键都读盘/缩放
+        if self.bubble_img_tk is None or self._bubble_size != size:
+            img = Image.open("assets/ui/bubble.png")
+            img = img.resize((size, size))
+            self.bubble_img_tk = ImageTk.PhotoImage(img)
+            self._bubble_size = size
+
+        self.bubble_item_id = self.mainframe.create_image(
+            size / 2, size / 2, image=self.bubble_img_tk)
 
         self.text_id = self.mainframe.create_text(size / 2, size / 2,
              text=str(self.current_count), fill="#151515",
