@@ -97,22 +97,28 @@ class TaPetKeyMain(tk.Tk):
 
         event = self.keyboard_trigger.queue_press_events[0]
 
-        # 新增一个文字粒子（单个透明窗口 + Canvas 多 item 渲染，
-        # 避免长按连发时反复创建/销毁 Toplevel 造成卡顿）
-        self.effect_window.add(
-            event.name if event.name != 'backspace' else 'delete')
+        try:
+            # 新增一个文字粒子（单个透明窗口 + PIL 合成渲染，
+            # 避免长按连发时反复创建/销毁 Toplevel 造成卡顿）
+            self.effect_window.add(
+                event.name if event.name != 'backspace' else 'delete')
 
-        if self.current_charactor.exists_id(f"key_{event.name}"):
-            # 存在合法id，特殊事件解析成功
-            self.current_charactor.base_switch(f"key_{event.name}")
-        else:
-            # 正常动画处理
-            self.current_charactor.normal_round()
-
-        # 防止idle自恢复的打断。
-        if self.keyboard_trigger.queue_press_events:
+            if self.current_charactor.exists_id(f"key_{event.name}"):
+                # 存在合法id，特殊事件解析成功
+                self.current_charactor.base_switch(f"key_{event.name}")
+            else:
+                # 正常动画处理
+                if self.last_event_name != event.name:
+                    self.current_charactor.normal_round()
+                else:self.random_bounce_event()
+                self.last_event_name = event.name
+        finally:
+            # 必须无条件出队：否则一旦上面抛异常，同一事件会被反复处理
+            # （毒丸卡死），导致之后只切贴图、不再弹跳。
+            if self.keyboard_trigger.queue_press_events:
+                self.keyboard_trigger.queue_press_events.pop(0)
+            # 防止idle自恢复的打断。
             self.last_press_time = time.time()
-            self.keyboard_trigger.queue_press_events.pop(0)
 
     def restore_check(self):
         """检查是否要进行贴图恢复"""
@@ -132,8 +138,11 @@ class TaPetKeyMain(tk.Tk):
 
     def process_release_event(self) -> None:
         """_处理释放事件_"""
-        self.combo_window.add_one()
-        self.keyboard_trigger.queue_release_events.pop(0)
+        try:
+            self.combo_window.add_one()
+        finally:
+            # 同样无条件出队，避免毒丸卡死
+            self.keyboard_trigger.queue_release_events.pop(0)
 
     def main_process(self) -> None:
         # 处理托盘线程发来的换肤请求（跨线程仅通过队列传递，主线程应用）

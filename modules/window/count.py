@@ -91,7 +91,7 @@ class CounterWindow(tk.Toplevel):
         size = self._size()
         frame = self._get_bubble(size).copy()
         draw = ImageDraw.Draw(frame)
-        font = self._get_font(max(1, int(30 * self.scale)))
+        font = self._get_font(max(1, int(40 * self.scale)))
         draw.text((size / 2, size / 2), str(self.current_count),
                   fill="#151515", font=font, anchor="mm")
         self._frame = frame
