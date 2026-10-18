@@ -1,0 +1,7 @@
+colorama==0.4.6
+keyboard==0.13.5
+loguru==0.7.3
+pillow==12.3.0
+pywin32==312
+six==1.17.0
+win32_setctime==1.2.0
