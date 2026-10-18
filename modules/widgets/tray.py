@@ -9,7 +9,11 @@ import win32gui
 import win32ui
 from PIL import Image, ImageChops
 
+from modules.config import is_autostart_enabled, set_autostart
+
 ICON_DIR = "assets/icon"
+AUTOSTART_ON_ICON = os.path.join(ICON_DIR, "on.png")
+AUTOSTART_OFF_ICON = os.path.join(ICON_DIR, "off.png")
 
 # 菜单项图标相对勾选栏尺寸的放大倍数
 ICON_SCALE = 2
@@ -48,6 +52,7 @@ def _append_owner_draw(menu, item_id):
 WM_TRAYICON = win32con.WM_USER + 20
 
 # 菜单项 ID
+ID_AUTOSTART = 1000
 ID_EXIT = 1001
 
 # owner-draw 消息
@@ -167,7 +172,7 @@ def _get_menu_font(hwnd):
             return win32gui.CreateFontIndirect(ncm["lfMenuFont"]), True
     except Exception:
         pass
-    return win32gui.GetStockObject(win32con.DEFAULT_GUI_FONT), False
+    return win32gui.GetStockObject(win32con.DEFAULT_GUI_FONT), False # type: ignore
 
 
 def _make_alpha_bitmap(image):
@@ -230,9 +235,18 @@ class AppTray:
         self._hfont = None
         self._hfont_owned = False
 
-        # 菜单项：(菜单项 ID, 文本, 图标文件路径)；图标可为 None
+        # 菜单项：id / 文本 / 图标（路径或返回路径的可调用对象）
         self.menu_items = [
-            (ID_EXIT, "退出", os.path.join(ICON_DIR, "exit.png")),
+            {
+                "id": ID_AUTOSTART,
+                "text": "开机自启动",
+                "icon": self._autostart_icon,
+            },
+            {
+                "id": ID_EXIT,
+                "text": "退出",
+                "icon": os.path.join(ICON_DIR, "exit.png"),
+            },
         ]
 
         self.start()
@@ -316,7 +330,7 @@ class AppTray:
         self._release_resources()
 
         hwnd = self.hwnd
-        menu_bg = get_menu_bg_color(hwnd)
+        menu_bg = get_menu_bg_color(hwnd) # type: ignore
         menu_text = get_theme_sys_color(hwnd, win32con.COLOR_MENUTEXT, (0, 0, 0))
         hl_bg = get_theme_sys_color(hwnd, win32con.COLOR_HIGHLIGHT, (0, 120, 215))
         hl_text = get_theme_sys_color(hwnd, win32con.COLOR_HIGHLIGHTTEXT, (255, 255, 255))
@@ -342,10 +356,16 @@ class AppTray:
             old_measure_font = win32gui.SelectObject(measure_hdc, self._hfont)
 
         try:
-            for item_id, text, icon_path in self.menu_items:
+            for item in self.menu_items:
+                item_id = item["id"]
+                text = item["text"]
+                icon_path = item["icon"]
+                if callable(icon_path):
+                    icon_path = icon_path()
+
                 bmp = None
-                if icon_path and os.path.exists(icon_path):
-                    src = Image.open(icon_path).convert("RGBA").resize(
+                if icon_path and os.path.exists(icon_path): # type: ignore
+                    src = Image.open(icon_path).convert("RGBA").resize( # type: ignore
                         (icon_size, icon_size), Image.LANCZOS) # type: ignore
                     bmp = _make_alpha_bitmap(src)   # 真透明（预乘 alpha）
                     self._bitmaps.append(bmp)
@@ -405,8 +425,8 @@ class AppTray:
 
         # 背景
         win32gui.FillRect(
-            hdc, (rc.left, rc.top, rc.right, rc.bottom),
-            self._hl_brush if selected else self._menu_brush)
+            hdc, (rc.left, rc.top, rc.right, rc.bottom), # type: ignore
+            self._hl_brush if selected else self._menu_brush) # type: ignore
 
         old_font = None
         if self._hfont:
@@ -431,6 +451,14 @@ class AppTray:
             if old_font:
                 win32gui.SelectObject(hdc, old_font)
 
+    def _autostart_icon(self):
+        """_按当前自启动状态返回对应图标_"""
+        return AUTOSTART_OFF_ICON if is_autostart_enabled() else AUTOSTART_ON_ICON
+
+    def _toggle_autostart(self):
+        """_切换开机自启动_"""
+        set_autostart(not is_autostart_enabled())
+
     def _show_menu(self):
         menu = self._build_menu()
         pos = win32gui.GetCursorPos()
@@ -446,8 +474,11 @@ class AppTray:
             if lparam in (win32con.WM_RBUTTONUP, win32con.WM_LBUTTONUP):
                 self._show_menu()
         elif msg == win32con.WM_COMMAND:
-            if win32api.LOWORD(wparam) == ID_EXIT:
+            item_id = win32api.LOWORD(wparam)
+            if item_id == ID_EXIT:
                 self.exit_func()
+            elif item_id == ID_AUTOSTART:
+                self._toggle_autostart()
         elif msg == win32con.WM_MEASUREITEM:
             return self._on_measure_item(lparam)
         elif msg == win32con.WM_DRAWITEM:
