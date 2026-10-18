@@ -3,5 +3,8 @@
     "description": "A simple base skin for the application.",
     "version": "1.0.0",
     "author": "Your Name",
-    "icon": "key_6.png"
+    "icon": "key_6.png",
+    "scale": 0.5,
+    "combo_offset": [0, 0],
+    "effect_offset": [70, 20]
 }

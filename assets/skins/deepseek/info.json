@@ -1,0 +1,10 @@
+{
+    "name": "DeepSeek",
+    "description": "DeepSeek 主题皮肤，包含普通状态与回车键素材。",
+    "version": "1.0.0",
+    "author": "Your Name",
+    "icon": "normal_1.png",
+    "scale": 0.5,
+    "combo_offset": [-40, 10],
+    "effect_offset": [70, 20]
+}
