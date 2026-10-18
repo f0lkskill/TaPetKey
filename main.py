@@ -57,6 +57,17 @@ class TaPetKeyMain(tk.Tk):
         self.after(int(self.update_internal * 1000), self.main_process)
         self.after(int(self.update_internal * 1000), self.restore_check)
 
+        # 添加注册热键
+        self.keyboard_trigger.apply_hot_keys(self.current_charactor.combine_keys)
+
+    def process_hot_key(self):
+        """_处理热键事件_"""
+        # 是否有热键事件
+        key_str = self.keyboard_trigger.queue_hot_keys.pop(0)
+        if key_str in self.current_charactor.combine_keys:
+            # 存在这个对应的热键，进行切换图像
+            self.current_charactor.base_switch(self.current_charactor.combine_keys[key_str].base_name)
+
     def process_press_event(self) -> None:
         """_处理按下事件_"""
 
@@ -115,7 +126,8 @@ class TaPetKeyMain(tk.Tk):
         processed = 0
         while processed < max_per_tick and \
               len(self.keyboard_trigger.queue_press_events) + \
-              len(self.keyboard_trigger.queue_release_events) > 0:
+              len(self.keyboard_trigger.queue_release_events) + \
+              len(self.keyboard_trigger.queue_hot_keys) > 0:
             try:
                 if len(self.keyboard_trigger.queue_press_events) > 0:
                     # 开始处理事件
@@ -123,6 +135,9 @@ class TaPetKeyMain(tk.Tk):
                 elif len(self.keyboard_trigger.queue_release_events) > 0:
                     # 开始处理释放事件
                     self.process_release_event()
+                elif len(self.keyboard_trigger.queue_hot_keys) > 0:
+                    # 开始处理热键事件
+                    self.process_hot_key()
 
             except Exception as e:
                 TaPetKeyLogger.error(f"处理键盘事件时发生错误：{e}")

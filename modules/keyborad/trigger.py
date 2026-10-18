@@ -6,6 +6,7 @@ class KeyboardTrigger:
     def __init__(self, refresh_interval: float = 1, update_internal: float = 0.01) -> None:
         self.queue_press_events:list = []
         self.queue_release_events:list = []
+        self.queue_hot_keys:list = []
         self.refresh_interval = refresh_interval
         self.update_internal = update_internal
 
@@ -50,6 +51,12 @@ class KeyboardTrigger:
 
         keyboard.hook(handle_event)
         keyboard.wait()  # 阻塞主线程
+
+    def apply_hot_keys(self, hot_keys: dict):
+        for key_str in hot_keys:
+            keyboard.add_hotkey(key_str, \
+                lambda key=key_str: self.queue_hot_keys.append(key))
+            TaPetKeyLogger.info(f"热键绑定: {key_str} -> {hot_keys[key_str]}")
 
     def on_any_press(self, event):
         if len(self.queue_press_events) >= 10:

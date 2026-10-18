@@ -25,6 +25,7 @@ class Charactor(tk.Canvas):
         self.switch_busy:bool = False
         self.clean_flag = False
         self.switch_frequency = 0
+        self.combine_keys = {}
 
         # 载入皮肤资源
         self.load_skin_res(asset_id)
@@ -88,7 +89,16 @@ class Charactor(tk.Canvas):
             asset_id (str, optional): _皮肤ID_. 默认是 'base'.
         """
         self.skin_assets = get_all_assets_tk_by_id(asset_id)
+        TaPetKeyLogger.info(f"{self.id_name} 获取到共 {len(self.skin_assets)} 个皮肤资源")
         TaPetKeyLogger.success(f"{self.id_name} 皮肤资源加载完成")
+        TaPetKeyLogger.info(f"开始分析 {self.id_name} 的素材热键绑定事件")
+        for asset in self.skin_assets:
+            if '+' in asset.base_name:
+                # 进行绑定中
+                key_str = asset.base_name.replace("key_", "")
+                self.combine_keys[key_str] = asset
+        TaPetKeyLogger.success(f"{self.id_name} 热键绑定事件分析完成, 共绑定 {len(self.combine_keys)} 个热键。")
+        TaPetKeyLogger.info(f"包含的热键：{[x for x in self.combine_keys.keys()]}")
 
     def base_switch(self, asset_id: str):
         # TaPetKeyLogger.debug(f"基础切换事件触发 {self.switch_func}")
