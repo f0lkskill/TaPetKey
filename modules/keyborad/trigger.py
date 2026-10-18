@@ -58,7 +58,10 @@ class KeyboardTrigger:
         #     .format(event.name, len(self.queue_press_events)))
 
     def on_any_release(self, event):
+        # if len(self.queue_release_events) >= 10:
+        #     # 不得制造过多的队列
+        #     return
         self.queue_release_events.append(event)
 
-        TaPetKeyLogger.info("键盘按键释放 {0}，当前队列数量: {1}" \
-            .format(event.name, len(self.queue_release_events)))
+        # TaPetKeyLogger.info("键盘按键释放 {0}，当前队列数量: {1}" \
+        #     .format(event.name, len(self.queue_release_events)))

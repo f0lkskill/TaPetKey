@@ -1,8 +1,4 @@
-import tkinter as tk
-from PIL import Image, ImageTk
-from threading import Thread, Event
-import time
-from modules.log import TaPetKeyLogger
+from .lib import *
 
 class CounterWindow(tk.Toplevel):
     """_combo计数器窗口_
@@ -14,22 +10,27 @@ class CounterWindow(tk.Toplevel):
     def __init__(self, refresh_internal: float = 3.0, *args, **kwargs):
         """_初始化计数器窗口_"""
         super().__init__(*args, **kwargs)
+        # 先隐藏，避免原生 Toplevel 默认窗口一闪而过
+        self.withdraw()
         self.mainframe:tk.Canvas
         self.bubble_img_tk:ImageTk.PhotoImage
         self.text_id:int = -1
         self.current_count:int = 0
         self.current_alpha:float = 0.0
-        self.last_input_time:float
+        self.last_input_time:float = 0.0
         self.refresh_internal:float = refresh_internal
-        self.fade_thread:Thread = None # type: ignore
-        self.stop_event:Event = Event()
+        self._fade_gen:int = 0
         self.has_lost = True
 
         self.init_window_attr()
         self.init_window_widget()
         self.draw_image()
 
-        Thread(target=self.detect_refresh, daemon=True).start()
+        # 属性就绪后再显示
+        self.deiconify()
+
+        # 主线程 after 轮询（避免子线程操作 tkinter）
+        self.after(int(self.refresh_internal * 1000), self.detect_refresh)
 
     def init_window_attr(self):
         """_初始化窗口属性_"""
@@ -56,7 +57,7 @@ class CounterWindow(tk.Toplevel):
         self.last_input_time = time.time()
         self.draw_image()
 
-        TaPetKeyLogger.debug(f"current has lost: {self.has_lost}")
+        # TaPetKeyLogger.debug(f"current has lost: {self.has_lost}")
 
         if self.has_lost:
             # 初始进行动效已经记录状态
@@ -77,56 +78,66 @@ class CounterWindow(tk.Toplevel):
                font=("Consolas", 30, 'bold'))
 
     def detect_refresh(self):
-        """_检测刷新_"""
-        while 1:
-            time.sleep(self.refresh_internal)
-            if self.has_lost:
-                continue
-            if time.time() - self.last_input_time >= self.refresh_internal:
-                # 失去连击！
-                self.call_fade(self.fade_away)
-                TaPetKeyLogger.debug("失去连击，开始淡出。")
+        """_检测刷新（主线程 after 轮询）_"""
+        if not self.has_lost and time.time() - self.last_input_time >= self.refresh_internal:
+            # 失去连击！
+            self.call_fade(self.fade_away)
+            TaPetKeyLogger.debug("失去连击，开始淡出。")
 
-                self.master.current_charactor.miss_round() # type: ignore
+            self.master.current_charactor.miss_round() # type: ignore
 
-                self.current_count = 0
-                self.has_lost = True
+            self.current_count = 0
+            self.has_lost = True
+
+        self.after(int(self.refresh_internal * 1000), self.detect_refresh)
 
     def call_fade(self, fade_func):
         TaPetKeyLogger.debug(f"调用渐变透明度效果: <{fade_func.__name__}>")
-        if self.fade_thread is None or not self.fade_thread.is_alive():
-            self.fade_thread = Thread(target=fade_func, args=(self.stop_event,), daemon=True)
-            self.fade_thread.start()
-        else:self.stop_event.set()
+        # 递增代号，旧动画在下一帧会因代号不符而自动停止
+        self._fade_gen += 1
+        fade_func(self._fade_gen)
 
-    def fade_away(self, stop_event:Event):
+    def fade_away(self, gen:int):
         """_淡出窗口_"""
         self.current_alpha = 1.0
         self.attributes('-alpha', 1.0)
 
-        a = 0.005
         v = 0.1
-        while(v > 0 and not stop_event.is_set()):
-            self.current_alpha -= v
-            v -= a
-            self.attributes('-alpha', self.current_alpha)
-            time.sleep(self.master.update_internal) # type: ignore
 
-    def fade_in(self, stop_event:Event):
+        def step():
+            nonlocal v
+            if gen != self._fade_gen:
+                return
+            if v <= 0:
+                self.current_alpha = 0.0
+                self.attributes('-alpha', 0.0)
+                return
+            self.current_alpha -= v
+            v -= 0.005
+            self.attributes('-alpha', max(0.0, self.current_alpha))
+            self.after(int(self.master.update_internal * 1000), step) # type: ignore
+
+        step()
+
+    def fade_in(self, gen:int):
         """_淡入窗口_"""
         # 初始化重置初始状态
-        self.current_alpha = 0
-        self.attributes('-alpha', 0)
+        self.current_alpha = 0.0
+        self.attributes('-alpha', 0.0)
 
-        a = 0.005
         v = 0.1
-        while(v > 0 and not stop_event.is_set()):
-            TaPetKeyLogger.debug(f"淡入窗口，透明度: {v}")
-            self.current_alpha += v
-            v -= a
-            self.attributes('-alpha', self.current_alpha)
-            time.sleep(self.master.update_internal) # type: ignore
 
-        # 结束状态
-        self.current_alpha = 1.0
-        self.attributes('-alpha', self.current_alpha)
+        def step():
+            nonlocal v
+            if gen != self._fade_gen:
+                return
+            if v <= 0:
+                self.current_alpha = 1.0
+                self.attributes('-alpha', 1.0)
+                return
+            self.current_alpha += v
+            v -= 0.005
+            self.attributes('-alpha', min(1.0, self.current_alpha))
+            self.after(int(self.master.update_internal * 1000), step) # type: ignore
+
+        step()

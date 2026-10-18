@@ -2,8 +2,6 @@
 from modules.log import TaPetKeyLogger
 from modules.skin_loader import *
 import tkinter as tk
-from time import sleep
-from threading import Thread
 from random import randint
 
 class Charactor(tk.Canvas):
@@ -24,7 +22,7 @@ class Charactor(tk.Canvas):
         self.image_scale:float = image_scale
         self.cache_tk_img:ImageTk.PhotoImage = None # type: ignore
         self.switch_func = switch_func
-        self.current_switch_thread:Thread = None # type: ignore
+        self.switch_busy:bool = False
         self.clean_flag = False
         self.switch_frequency = 0
 
@@ -33,9 +31,6 @@ class Charactor(tk.Canvas):
 
         # 默认切换到 normal1
         self.switch_image("normal_1")
-        
-        self.switch_thread = Thread(target=self.base_switch, daemon=True) # type: ignore
-        # self.switch_thread.start()
 
     def switch_image(self, signal_asset_id:str):
         """_切换当前显示的图像_
@@ -104,20 +99,19 @@ class Charactor(tk.Canvas):
         if self.switch_frequency >= 1:
             return False
 
-        if not self.current_switch_thread or not self.current_switch_thread.is_alive():
-            # 同一时间只能有一个回调进程
-            def pack():
-                self.switch_func() # type: ignore
-                self.switch_frequency = 0
-
-            # 开跑
-            self.current_switch_thread = Thread(target=pack, daemon=True) # type: ignore
-            try:self.current_switch_thread.start()
-            except Exception as e:TaPetKeyLogger.error("切换线程启动失败, {}", e)
+        if not self.switch_busy and self.switch_func:
+            # 同一时间只能有一个回调进程（主线程 after 驱动，完成后回调复位）
+            self.switch_busy = True
+            self.switch_func(self._on_switch_finish) # type: ignore
 
         self.switch_frequency += 1
 
         return True
+
+    def _on_switch_finish(self):
+        """_切换回调结束，复位状态_"""
+        self.switch_frequency = 0
+        self.switch_busy = False
 
     def normal_round(self):
         """_执行正常normal动画_

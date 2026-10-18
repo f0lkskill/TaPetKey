@@ -5,7 +5,6 @@ from modules.widgets.charactor import *
 from modules.keyborad import *
 from modules.window import *
 from random import randint
-import time
 
 class TaPetKeyMain(tk.Tk):
     """TaPetKey 程序的主窗口类体。
@@ -28,6 +27,15 @@ class TaPetKeyMain(tk.Tk):
         self.grvaity:float = 3
         self.update_internal:float = 0.01
         self.combo_window = CounterWindow(master = self)
+        self.effect_windows = []
+        self.max_effect_windows:int = 3
+
+        # 弹跳动画状态
+        self._bounce_initial_y:int = 0
+        self._bounce_total:float = 0.0
+        self._bounce_strength:float = 0.0
+        self._bounce_phase:str = "up"
+        self._bounce_on_finish = None
 
         self.transparentcolor = "#000000"
 
@@ -40,11 +48,21 @@ class TaPetKeyMain(tk.Tk):
         # 加载控件资源
         self.init_app_widgets()
 
-        Thread(target=self.main_process, daemon=True).start()
+        # 主线程轮询事件队列（避免子线程操作 tkinter 导致窗口闪烁/崩溃）
+        self.after(int(self.update_internal * 1000), self.main_process)
 
     def process_press_event(self) -> None:
         """_处理按下事件_"""
+
         event = self.keyboard_trigger.queue_press_events[0]
+
+        # 清理已经销毁的窗口，避免列表无限增长
+        self.effect_windows = [w for w in self.effect_windows if w.winfo_exists()]
+        # 限制同时存在的效果窗口数量，防止长按时 CPU 打满
+        if len(self.effect_windows) < self.max_effect_windows:
+            self.effect_windows.append(
+                EffectWindow(show_text=event.name if event.name != 'backspace' else 'delete', master=self,
+                             on_close=self._remove_effect_window))
 
         if self.current_charactor.exists_id(f"key_{event.name}"):
             # 存在合法id，特殊事件解析成功
@@ -57,22 +75,22 @@ class TaPetKeyMain(tk.Tk):
             # 有队列，进行 pop 完成处理。            
             # 切出
             if not self.current_charactor.clean_flag:
-                
-                def pack():
+
+                def recover():
                     # 包装恢复进程
-                    self.current_charactor.clean_flag = True
-                    time.sleep(self.update_internal * 100)
                     if len(self.keyboard_trigger.queue_press_events) == 0 and \
                         'normal' not in self.current_charactor.current_image.base_name:
                         # 正常进行轮换
                         self.current_charactor.normal_round()
-                        TaPetKeyLogger.success("自恢复进程条件满足，进行恢复。")
+                        # TaPetKeyLogger.success("自恢复进程条件满足，进行恢复。")
                     else:
-                        TaPetKeyLogger.warning("自恢复进程条件不满足，不进行恢复。")
+                        pass
+                        # TaPetKeyLogger.warning("自恢复进程条件不满足，不进行恢复。")
                     self.current_charactor.clean_flag = False
 
-                # 开始线程
-                Thread(target=pack, daemon=True).start()
+                # 主线程延迟调度恢复
+                self.current_charactor.clean_flag = True
+                self.after(int(self.update_internal * 1000 * 100), recover)
 
             if self.keyboard_trigger.queue_press_events:
                 # 防止idle自恢复的打断。
@@ -83,55 +101,85 @@ class TaPetKeyMain(tk.Tk):
         self.combo_window.add_one()
         self.keyboard_trigger.queue_release_events.pop(0)
 
+    def _remove_effect_window(self, window) -> None:
+        """_效果窗口关闭时从列表中移除_"""
+        if window in self.effect_windows:
+            self.effect_windows.remove(window)
+
     def main_process(self) -> None:
-        while(1):
-            time.sleep(self.update_internal)
-            while(len(self.keyboard_trigger.queue_press_events) + \
-                  len(self.keyboard_trigger.queue_release_events) > 0):
-                try:
-                    if len(self.keyboard_trigger.queue_press_events) > 0:
-                        # 开始处理事件
-                        self.process_press_event()
-                    elif len(self.keyboard_trigger.queue_release_events) > 0:
-                        # 开始处理释放事件
-                        self.process_release_event()
+        # 每帧限量处理，长按连发时也要让主线程及时返回事件循环，避免卡死
+        max_per_tick = 2
+        processed = 0
+        while processed < max_per_tick and \
+              len(self.keyboard_trigger.queue_press_events) + \
+              len(self.keyboard_trigger.queue_release_events) > 0:
+            try:
+                if len(self.keyboard_trigger.queue_press_events) > 0:
+                    # 开始处理事件
+                    self.process_press_event()
+                elif len(self.keyboard_trigger.queue_release_events) > 0:
+                    # 开始处理释放事件
+                    self.process_release_event()
 
-                except Exception as e:
-                    TaPetKeyLogger.error(f"处理键盘事件时发生错误：{e}")
+            except Exception as e:
+                TaPetKeyLogger.error(f"处理键盘事件时发生错误：{e}")
+            processed += 1
 
-    def random_bounce_event(self):
-        self.bounce_event(randint(5, 15))
+        # 主线程 after 轮询
+        self.after(int(self.update_internal * 1000), self.main_process)
 
-    def bounce_event(self, strength:float):
+    def random_bounce_event(self, on_finish=None):
+        self.bounce_event(randint(5, 15), on_finish)
+
+    def bounce_event(self, strength:float, on_finish=None):
         """_触发窗口_
 
         Args:
             strength (float): _弹跳力度大小_
         """
-        initial_y = self.winfo_y()
-        total_offset = 0
-
         # TaPetKeyLogger.debug(f"弹跳事件触发，力度: {strength}")
 
-        while(strength > 0):
-            # 向上动量消耗
-            total_offset += strength
-            self.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()-strength)}")
-            self.combo_window.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()-strength)}")
-            strength -= self.grvaity
-            time.sleep(self.update_internal)
+        self._bounce_initial_y = self.winfo_y()
+        self._bounce_total = 0.0
+        self._bounce_strength = float(strength)
+        self._bounce_phase = "up"
+        self._bounce_on_finish = on_finish
+        self._bounce_step()
 
-        while(total_offset > 0):
+    def _bounce_step(self):
+        """_弹跳动画单帧（主线程 after 驱动）_"""
+        interval = max(1, int(self.update_internal * 1000))
+
+        if self._bounce_phase == "up":
+            if self._bounce_strength > 0:
+                # 向上动量消耗
+                self._bounce_total += self._bounce_strength
+                self.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()-self._bounce_strength)}")
+                self.combo_window.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()-self._bounce_strength)}")
+                self._bounce_strength -= self.grvaity
+                self.after(interval, self._bounce_step)
+                return
+            self._bounce_phase = "down"
+            self.after(interval, self._bounce_step)
+            return
+
+        if self._bounce_total > 0:
             # 重力向下
-            total_offset -= strength
-            self.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()+strength)}")
-            self.combo_window.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()+strength)}")
-            strength += self.grvaity
-            time.sleep(self.update_internal)
+            self._bounce_total -= self._bounce_strength
+            self.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()+self._bounce_strength)}")
+            self.combo_window.geometry(f"+{self.winfo_x()}+{int(self.winfo_y()+self._bounce_strength)}")
+            self._bounce_strength += self.grvaity
+            self.after(interval, self._bounce_step)
+            return
 
         # 回归初始坐标
-        self.geometry(f"+{self.winfo_x()}+{initial_y}")
-        self.combo_window.geometry(f"+{self.combo_window.winfo_x()}+{initial_y}")
+        self.geometry(f"+{self.winfo_x()}+{self._bounce_initial_y}")
+        self.combo_window.geometry(f"+{self.combo_window.winfo_x()}+{self._bounce_initial_y}")
+
+        if self._bounce_on_finish:
+            callback = self._bounce_on_finish
+            self._bounce_on_finish = None
+            callback()
 
     def start_move(self, event) -> None:
         """_更新窗口偏移量_
