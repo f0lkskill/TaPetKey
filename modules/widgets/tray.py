@@ -16,6 +16,9 @@ ICON_DIR = "assets/icon"
 AUTOSTART_ON_ICON = os.path.join(ICON_DIR, "on.png")
 AUTOSTART_OFF_ICON = os.path.join(ICON_DIR, "off.png")
 SKIN_ICON = os.path.join(ICON_DIR, "skin.png")
+ZOOM_IN_ICON = os.path.join(ICON_DIR, "add.png")
+ZOOM_OUT_ICON = os.path.join(ICON_DIR, "remove.png")
+EXIT_ICON = os.path.join(ICON_DIR, "exit.png")
 
 # 菜单项图标相对勾选栏尺寸的放大倍数
 ICON_SCALE = 2
@@ -267,12 +270,12 @@ class AppTray:
             {
                 "id": ID_ZOOM_IN,
                 "text": "放大 (+10%)",
-                "icon": None,
+                "icon": ZOOM_IN_ICON,
             },
             {
                 "id": ID_ZOOM_OUT,
                 "text": "缩小 (-10%)",
-                "icon": None,
+                "icon": ZOOM_OUT_ICON,
             },
             {
                 "id": ID_AUTOSTART,
