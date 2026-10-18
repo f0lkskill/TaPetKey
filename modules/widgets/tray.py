@@ -70,6 +70,11 @@ WM_TRAYICON = win32con.WM_USER + 20
 ID_AUTOSTART = 1000
 ID_EXIT = 1001
 ID_SKIN = 1002
+ID_ZOOM_IN = 1003
+ID_ZOOM_OUT = 1004
+
+# 每次缩放步进
+ZOOM_STEP = 0.1
 
 # owner-draw 消息
 _ODT_MENU = 1
@@ -235,9 +240,10 @@ class AppTray:
     因此图标可以自由放大，且菜单项高度会随图标自适应。
     """
 
-    def __init__(self, exit_func, on_switch_skin=None):
+    def __init__(self, exit_func, on_switch_skin=None, on_zoom=None):
         self.exit_func = exit_func
         self.on_switch_skin = on_switch_skin
+        self.on_zoom = on_zoom
         self.hwnd = None
         self.hicon = None
         self._thread = None
@@ -258,6 +264,16 @@ class AppTray:
         #   {id, text, icon(路径或返回路径的可调用对象), submenu?}
         #   带 submenu 的项点击时手动弹出子菜单，并在右侧绘制箭头。
         self.menu_items = [
+            {
+                "id": ID_ZOOM_IN,
+                "text": "放大 (+10%)",
+                "icon": None,
+            },
+            {
+                "id": ID_ZOOM_OUT,
+                "text": "缩小 (-10%)",
+                "icon": None,
+            },
             {
                 "id": ID_AUTOSTART,
                 "text": "开机自启动",
@@ -592,6 +608,12 @@ class AppTray:
                 self._toggle_autostart()
             elif item_id == ID_SKIN:
                 self._show_skin_submenu()
+            elif item_id == ID_ZOOM_IN:
+                if self.on_zoom:
+                    self.on_zoom(ZOOM_STEP)
+            elif item_id == ID_ZOOM_OUT:
+                if self.on_zoom:
+                    self.on_zoom(-ZOOM_STEP)
             else:
                 skin_id = self._skin_item_map.get(item_id)
                 if skin_id is not None and self.on_switch_skin:

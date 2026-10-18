@@ -7,7 +7,7 @@ class CounterWindow(tk.Toplevel):
         tk (_type_): _tk_
     """
 
-    def __init__(self, refresh_internal: float = 3.0, *args, **kwargs):
+    def __init__(self, refresh_internal: float = 3.0, scale: float = 1.0, *args, **kwargs):
         """_初始化计数器窗口_"""
         super().__init__(*args, **kwargs)
         # 先隐藏，避免原生 Toplevel 默认窗口一闪而过
@@ -19,6 +19,7 @@ class CounterWindow(tk.Toplevel):
         self.current_alpha:float = 0.0
         self.last_input_time:float = 0.0
         self.refresh_internal:float = refresh_internal
+        self.scale:float = scale
         self._fade_gen:int = 0
         self.has_lost = True
 
@@ -32,10 +33,25 @@ class CounterWindow(tk.Toplevel):
         # 主线程 after 轮询（避免子线程操作 tkinter）
         self.after(int(self.refresh_internal * 1000), self.detect_refresh)
 
+    def _size(self) -> int:
+        """_按缩放比例计算气泡边长_"""
+        return max(1, int(125 * self.scale))
+
+    def apply_scale(self, scale: float):
+        """_应用新的缩放比例（窗口尺寸、气泡图与字号同步缩放）_
+
+        Args:
+            scale (float): _缩放比例_
+        """
+        self.scale = scale
+        size = self._size()
+        self.geometry(f"{size}x{size}")
+        self.draw_image()
+
     def init_window_attr(self):
         """_初始化窗口属性_"""
         self.title("计数器")
-        self.geometry("125x125")
+        self.geometry(f"{self._size()}x{self._size()}")
         self.attributes("-topmost", True)
         self.config(bg="black")
         self.attributes("-transparentcolor", "black")
@@ -68,14 +84,15 @@ class CounterWindow(tk.Toplevel):
         """_初始化图像_"""
         self.mainframe.delete(self.text_id)
 
+        size = self._size()
         img = Image.open("assets/ui/bubble.png")
-        img = img.resize((125, 125))
+        img = img.resize((size, size))
         self.bubble_img_tk = ImageTk.PhotoImage(img)
-        self.mainframe.create_image(62.5, 62.5, image=self.bubble_img_tk)
+        self.mainframe.create_image(size / 2, size / 2, image=self.bubble_img_tk)
 
-        self.text_id = self.mainframe.create_text(62.5, 62.5,
+        self.text_id = self.mainframe.create_text(size / 2, size / 2,
              text=str(self.current_count), fill="#151515",
-               font=("Consolas", 30, 'bold'))
+               font=("Consolas", max(1, int(30 * self.scale)), 'bold'))
 
     def detect_refresh(self):
         """_检测刷新（主线程 after 轮询）_"""

@@ -42,6 +42,38 @@ def get_all_skins() -> list[dict]:
         })
     return skins
 
+# 皮肤 info.json 的可选字段默认值（缺失时回退）
+DEFAULT_SKIN_INFO = {
+    "scale": 0.5,               # 角色基准缩放比例
+    "combo_offset": [0, 0],     # 气泡 combo 窗口相对主窗口左上角的偏移
+    "effect_offset": [70, 20],  # 特效文本窗口相对主窗口中心的偏移
+}
+
+
+def get_skin_info(asset_id: str) -> dict:
+    """_读取指定皮肤的完整配置_
+
+    返回 info.json 的全部字段，并补齐可选字段的默认值。
+
+    Args:
+        asset_id (str): _皮肤ID（目录名）_
+
+    Returns:
+        dict: _皮肤配置_
+    """
+    info = dict(DEFAULT_SKIN_INFO)
+    info_path = os.path.join("assets", "skins", asset_id, "info.json")
+    if os.path.exists(info_path):
+        try:
+            with open(info_path, "r", encoding="utf-8") as f:
+                info.update(json.load(f))
+        except (OSError, json.JSONDecodeError) as e:
+            TaPetKeyLogger.error(f"读取皮肤配置失败 {info_path}: {e}")
+    else:
+        TaPetKeyLogger.warning(f"未找到皮肤配置: {info_path}")
+    return info
+
+
 def get_skin_path_by_id(asset_id:str) -> str | None:
     """_获取皮肤路径_
 

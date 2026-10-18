@@ -56,6 +56,15 @@ class Charactor(tk.Canvas):
         return int(self.current_image.width * self.image_scale), \
                int(self.current_image.height * self.image_scale)
 
+    def apply_scale(self, image_scale: float):
+        """_设置图像缩放比例并立即重绘_
+
+        Args:
+            image_scale (float): _图像显示缩放比例_
+        """
+        self.image_scale = image_scale
+        self.update_image()
+
     def exists_id(self, asset_id: str):
         return any(asset.base_name == asset_id for asset in self.skin_assets)
 
@@ -143,8 +152,13 @@ class Charactor(tk.Canvas):
         for assets in self.skin_assets:
             if assets.base_name.startswith("normal"):
                 total_normal += 1
-        # 随机图片切换
 
+        if total_normal == 0:
+            # 回退保护：无 normal 素材时保持当前图像，避免 randint 越界
+            TaPetKeyLogger.warning(f"{self.id_name} 缺少 normal 素材，跳过切换。")
+            return
+
+        # 随机图片切换
         self.base_switch(f"normal_{randint(1, total_normal)}")
 
     def miss_round(self):
@@ -154,5 +168,12 @@ class Charactor(tk.Canvas):
         for assets in self.skin_assets:
             if assets.base_name.startswith("miss"):
                 total_miss += 1
+
+        if total_miss == 0:
+            # 回退保护：无 miss 素材时用普通动画代替，避免 randint 越界
+            TaPetKeyLogger.warning(f"{self.id_name} 缺少 miss 素材，回退 normal 动画。")
+            self.normal_round()
+            return
+
         # 随机图片切换
         self.base_switch(f"miss_{randint(1, total_miss)}")

@@ -19,6 +19,12 @@ RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 # 自启动在 Run 键中的值名
 AUTOSTART_VALUE = APP_NAME
 
+# 其余持久化配置的值名
+SKIN_VALUE = "skin"         # 最后使用的皮肤ID
+SCALE_VALUE = "scale"       # 整体缩放比例
+POS_X_VALUE = "win_x"       # 主窗口最后的 X
+POS_Y_VALUE = "win_y"       # 主窗口最后的 Y
+
 
 def get_exe_path() -> str:
     """_获取默认程序路径_
