@@ -20,6 +20,9 @@ class KeyboardTrigger:
             time.sleep(self.refresh_interval)
             self.queue_press_events.clear()
 
+    def unhook_all_event(self):
+        keyboard.unhook_all()
+
     def bind_event(self):
         """绑定所有相关事件"""
         import queue

@@ -1,8 +1,9 @@
-import time
+import time, os
+import os
 import tkinter as tk
 from modules.log import *
 from modules.skin_loader import *
-from modules.widgets.charactor import *
+from modules.widgets import *
 from modules.keyborad import *
 from modules.window import *
 from random import randint
@@ -23,6 +24,7 @@ class TaPetKeyMain(tk.Tk):
         TaPetKeyLogger.info("主程序进入初始化流程")
 
         self.current_charactor:Charactor
+        self.app_tray:AppTray = AppTray(self._exit_app)
         self._drag_start_x = 0
         self._drag_start_y = 0
         self.grvaity:float = 3
@@ -225,8 +227,6 @@ class TaPetKeyMain(tk.Tk):
         self.attributes('-transparentcolor', self.transparentcolor)
         self.overrideredirect(True)
 
-        # self.attributes('-disabled', True)  # 忽略鼠标事件，实现穿透
-
         self.bind_window_event()
 
     def init_app_widgets(self):
@@ -240,8 +240,21 @@ class TaPetKeyMain(tk.Tk):
         )
         self.current_charactor.pack(side=tk.TOP)
 
-    def test(self):
-        TaPetKeyLogger.debug(f"获取到 base 皮肤图像表单：{get_all_assets_tk_by_id('base')[1]}")
+    def _exit_app(self):
+        TaPetKeyLogger.info("程序触发退出事件。")
+
+        # 托盘菜单回调运行在 pystray 线程上，这里只做关闭与强制退出，
+        # 避免跨线程操作 tkinter 抛异常导致 os._exit 执行不到。
+        try:
+            self.app_tray.stop()
+        except Exception:
+            pass
+        try:
+            self.keyboard_trigger.unhook_all_event()
+        except Exception:
+            pass
+
+        os._exit(0)
 
 if __name__=="__main__":
 
