@@ -25,9 +25,7 @@ class Charactor(tk.Canvas):
         self.image_scale:float = image_scale
         self.switch_func = switch_func
         self.on_render = on_render
-        self.switch_busy:bool = False
         self.clean_flag = False
-        self.switch_frequency = 0
         self.combine_keys = {}
 
         # 载入皮肤资源
@@ -117,27 +115,18 @@ class Charactor(tk.Canvas):
         self.switch_image("normal_1")
 
     def base_switch(self, asset_id: str):
-        # TaPetKeyLogger.debug(f"基础切换事件触发 {self.switch_func}")
+        """_切换贴图并触发弹跳回调_
 
-        # 进入触发切换流程
+        “同一时间只弹跳一次”由回调方（主窗口的弹跳实现）自行保证，
+        这里不再用计数去互斥：计数在“无回调弹跳 + 切换贴图”交错时可能
+        无法复位，会让弹跳永久失效。
+        """
         self.switch_image(asset_id)
 
-        if self.switch_frequency >= 1:
-            return False
-
-        if not self.switch_busy and self.switch_func:
-            # 同一时间只能有一个回调进程（主线程 after 驱动，完成后回调复位）
-            self.switch_busy = True
-            self.switch_func(self._on_switch_finish) # type: ignore
-
-        self.switch_frequency += 1
+        if self.switch_func:
+            self.switch_func() # type: ignore
 
         return True
-
-    def _on_switch_finish(self):
-        """_切换回调结束，复位状态_"""
-        self.switch_frequency = 0
-        self.switch_busy = False
 
     def normal_round(self):
         """_执行正常normal动画_

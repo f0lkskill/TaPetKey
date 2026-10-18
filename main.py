@@ -1,4 +1,4 @@
-import time, os, queue
+import time, os, queue, sys
 import tkinter as tk
 from modules.log import *
 from modules.skin_loader import *
@@ -198,7 +198,7 @@ class TaPetKeyMain(tk.Tk):
         """
         # TaPetKeyLogger.debug(f"弹跳事件触发，力度: {strength}")
         if self._is_bounce:
-            # 已有弹跳进行中：立即回收本次回调，避免调用方（switch_busy）卡死
+            # 已有弹跳进行中：忽略本次请求（如有回调则立即回收，避免调用方等待）
             if on_finish:
                 on_finish()
             return
@@ -284,8 +284,7 @@ class TaPetKeyMain(tk.Tk):
             self._rest_y = int(round(self._rest_y + self._bounce_offset))
             self._bounce_offset = 0.0
             self._bounce_v = 0.0
-            # 关键：必须回调 on_finish，否则 charactor.switch_busy 永久卡住，
-            # 之后只会切换贴图、不再触发弹跳动画
+            # 若本次弹跳带回调，务必触发，避免调用方一直等待
             callback = self._bounce_on_finish
             self._bounce_on_finish = None
             if callback:
@@ -511,6 +510,11 @@ class TaPetKeyMain(tk.Tk):
         os._exit(0)
 
 if __name__=="__main__":
+
+    # 打包运行时把工作目录切到资源目录（_MEIPASS），
+    # 保证代码里 "assets/..." 这类相对路径可正确寻址
+    if getattr(sys, "frozen", False):
+        os.chdir(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)))
 
     app = TaPetKeyMain()
     app.mainloop()

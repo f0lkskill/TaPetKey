@@ -1,12 +1,16 @@
 """_项目配置库，所有配置统一由注册表管理。_
 """
 import os
+import sys
 import winreg
 
 from modules.log import TaPetKeyLogger
 
-# 项目根目录（main.py 所在目录）
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 项目根目录：源码运行时为 main.py 所在目录；打包运行时为 exe 所在目录
+if getattr(sys, "frozen", False):
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 APP_NAME = "TaPetKey"
 EXE_NAME = "TaPetKey.exe"

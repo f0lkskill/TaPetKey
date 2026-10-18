@@ -1,0 +1,69 @@
+name: Build & Release
+
+# 手动触发：在 Actions 页面点击 "Run workflow"，
+# 填写版本号后自动打包 exe 并创建 Release。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（将作为 tag 与 Release 标题，例如 v0.1.0）"
+        required: true
+        default: "v0.1.0"
+      prerelease:
+        description: "标记为预发布（Pre-release）"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build executable
+        run: pyinstaller --noconfirm --clean --noconsole --name TaPetKey --icon assets/icon/icon.ico --add-data "assets/icon;assets/icon" --add-data "assets/skins;assets/skins" --add-data "assets/ui;assets/ui" main.py
+
+      - name: Package zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/TaPetKey/* -DestinationPath "TaPetKey-${{ inputs.version }}.zip"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: TaPetKey ${{ inputs.version }}
+          prerelease: ${{ inputs.prerelease }}
+          body: |
+            **TaPetKey** 桌面键盘反馈桌宠 · `${{ inputs.version }}`
+
+            下载下方压缩包，解压后双击 `TaPetKey.exe` 即可运行（无需安装 Python）。
+
+            ### 包含
+            - 双皮肤：Base Skin / DeepSeek Skin
+            - 键盘反馈、Combo 气泡、按键特效文字
+            - 每像素 alpha 真透明窗口（透明处点击穿透）
+            - 托盘换肤 / 无级缩放 / 开机自启 / 位置记忆
+
+            ### 使用
+            1. 下载并解压 `TaPetKey-${{ inputs.version }}.zip`
+            2. 双击 `TaPetKey.exe` 运行
+            3. 右键托盘图标可换肤、缩放、退出
+
+            > 若被安全软件拦截（程序使用全局键盘钩子），请将解压目录加入白名单。
+          files: TaPetKey-${{ inputs.version }}.zip

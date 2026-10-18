@@ -6,7 +6,9 @@ import sys
 
 TaPetKeyLogger.add("app.log")
 
-TaPetKeyLogger.add(sys.stdout)
+# 打包（--noconsole）运行时 sys.stdout 为 None，需跳过控制台输出
+if sys.stdout is not None:
+    TaPetKeyLogger.add(sys.stdout)
 
 TaPetKeyLogger.remove(0)  # 移除默认处理器
 TaPetKeyLogger.add(
