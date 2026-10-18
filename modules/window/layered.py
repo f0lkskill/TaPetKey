@@ -22,6 +22,10 @@ ULW_ALPHA = 0x00000002
 AC_SRC_OVER = 0x00
 AC_SRC_ALPHA = 0x01
 GA_ROOT = 2
+HWND_TOPMOST = -1
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
+SWP_NOACTIVATE = 0x0010
 
 
 class _BLENDFUNCTION(ctypes.Structure):
@@ -70,6 +74,9 @@ gdi32.DeleteObject.restype = wt.BOOL
 gdi32.DeleteObject.argtypes = [wt.HGDIOBJ]
 gdi32.DeleteDC.restype = wt.BOOL
 gdi32.DeleteDC.argtypes = [wt.HDC]
+user32.SetWindowPos.restype = wt.BOOL
+user32.SetWindowPos.argtypes = [
+    wt.HWND, wt.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, wt.UINT]
 
 
 class LayeredWindow:
@@ -167,6 +174,16 @@ class LayeredWindow:
             ctypes.byref(wt.SIZE(width, height)),
             self._mem_dc, ctypes.byref(wt.POINT(0, 0)), 0,
             ctypes.byref(blend), ULW_ALPHA)
+
+    def bring_to_top(self) -> None:
+        """_把窗口提到 topmost 组最上层（不改位置/尺寸，也不抢焦点）_
+
+        多个 topmost 窗口之间的前后顺序由最后一次 SetWindowPos 决定，
+        分层窗口用 UpdateLayeredWindow 更新内容不会改变 z 序；因此需要显式调用。
+        """
+        self.bind()
+        user32.SetWindowPos(self._hwnd, wt.HWND(HWND_TOPMOST), 0, 0, 0, 0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
 
     def release(self) -> None:
         """_释放 GDI 资源_"""

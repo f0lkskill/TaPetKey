@@ -89,6 +89,8 @@ class EffectWindow(tk.Toplevel):
         self._pos = (int(x), int(y))
         if self._alive and self._last_frame is not None:
             self.surface.set_frame(self._last_frame, self._pos[0], self._pos[1])
+            # 拖拽等时机主窗口可能被置顶，这里把特效窗重新提到最上层
+            self.surface.bring_to_top()
 
     def add(self, show_text: str):
         """_新增一个文字粒子_
@@ -122,6 +124,7 @@ class EffectWindow(tk.Toplevel):
             self._last_time = time.time()
             self._tick()          # 立即合成并推送首帧
             self.deiconify()
+            self.surface.bring_to_top()  # 确保特效层位于角色/气泡窗口之上
 
     def _get_base_img(self, text: str) -> Image.Image:
         """_获取（带缓存的）基础文本图像_"""

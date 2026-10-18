@@ -55,6 +55,7 @@ class TaPetKeyMain(tk.Tk):
         self.effect_window:EffectWindow = None # type: ignore
         self.last_press_time:float = time.time()
         self.restore_time:float = 1.0
+        self.last_event_name:str = ''
 
         # 弹跳动画状态（基于逻辑静止坐标，不依赖 winfo 的时序滞后）
         self._is_bounce:bool = False
@@ -188,6 +189,9 @@ class TaPetKeyMain(tk.Tk):
         """
         # TaPetKeyLogger.debug(f"弹跳事件触发，力度: {strength}")
         if self._is_bounce:
+            # 已有弹跳进行中：立即回收本次回调，避免调用方（switch_busy）卡死
+            if on_finish:
+                on_finish()
             return
 
         self._is_bounce = True
@@ -228,15 +232,27 @@ class TaPetKeyMain(tk.Tk):
             return
         interval = max(1, int(self.update_internal * 1000))
 
-        # 速度积分：位置 += 速度；速度 += 重力（向下为正）
-        self._bounce_offset += self._bounce_v
-        self._bounce_v += self.grvaity
+        try:
+            # 速度积分：位置 += 速度；速度 += 重力（向下为正）
+            self._bounce_offset += self._bounce_v
+            self._bounce_v += self.grvaity
 
-        # 回到静止位置（或已越过向下）时结束，并精确归位
-        if self._bounce_offset >= 0:
-            self._bounce_offset = 0.0
+            # 回到静止位置（或已越过向下）时结束，并精确归位
+            if self._bounce_offset >= 0:
+                self._bounce_offset = 0.0
+                self._apply_bounce_frame()
+                # 无条件复位，避免 on_finish 为空时卡住状态
+                self._is_bounce = False
+                callback = self._bounce_on_finish
+                self._bounce_on_finish = None
+                if callback:
+                    callback()
+                return
+
             self._apply_bounce_frame()
-            # 无条件复位，避免 on_finish 为空时卡住状态
+        except Exception as e:
+            # 渲染等中途异常时兜底复位，避免 after 链断裂、状态永久卡死
+            TaPetKeyLogger.error(f"弹跳动画异常，已复位：{e}")
             self._is_bounce = False
             callback = self._bounce_on_finish
             self._bounce_on_finish = None
@@ -244,7 +260,6 @@ class TaPetKeyMain(tk.Tk):
                 callback()
             return
 
-        self._apply_bounce_frame()
         self.after(interval, self._bounce_step)
 
     def start_move(self, event) -> None:
@@ -257,9 +272,15 @@ class TaPetKeyMain(tk.Tk):
         # 把弹跳的当前偏移并入静止基准（分层窗口下 winfo 不可靠，不用它）
         if self._is_bounce:
             self._is_bounce = False
-            self._bounce_on_finish = None
             self._rest_y = int(round(self._rest_y + self._bounce_offset))
             self._bounce_offset = 0.0
+            self._bounce_v = 0.0
+            # 关键：必须回调 on_finish，否则 charactor.switch_busy 永久卡住，
+            # 之后只会切换贴图、不再触发弹跳动画
+            callback = self._bounce_on_finish
+            self._bounce_on_finish = None
+            if callback:
+                callback()
 
         self._drag_start_x = event.x_root
         self._drag_start_y = event.y_root
